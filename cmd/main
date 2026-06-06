@@ -25,12 +25,38 @@ ensure_dirs() {
     mkdir -p "${TRIM_PKGVAR}"
 }
 
-# 首次启动生成默认配置
+# 首次启动生成默认配置 / 升级时合并新字段
+# v1.0.7+ 升级：检测旧版 config.json 缺哪些新字段，缺失则备份旧文件并重新生成
+# 当前 v1.1 字段集：whitelist.{pids,users,process_names,cmdline_keywords} + ui + auth
+# 后续 v1.0.7+ 加新字段时只需更新这里的"必填字段列表"
 ensure_default_config() {
     if [ -f "${CONFIG_FILE}" ]; then
-        return 0
+        # v1.0.7+ 升级：检测缺失字段
+        local existing
+        existing=$(cat "${CONFIG_FILE}" 2>/dev/null)
+        local need_regen=0
+
+        # 必填字段（任一缺失 → 重新生成）
+        for field in "pids" "users" "process_names" "cmdline_keywords" "ui" "auth"; do
+            if ! echo "${existing}" | grep -q "\"${field}\""; then
+                need_regen=1
+                log_msg "Config field missing: ${field}"
+                break
+            fi
+        done
+
+        if [ ${need_regen} -eq 0 ]; then
+            return 0
+        fi
+
+        # 缺字段：备份旧文件 + 重新生成
+        local backup_file="${CONFIG_FILE}.bak.$(date +%s)"
+        cp -p "${CONFIG_FILE}" "${backup_file}" 2>/dev/null
+        log_msg "Upgrading config.json (missing fields detected)..."
+        log_msg "Old config backed up to: ${backup_file}"
+        rm -f "${CONFIG_FILE}"
     fi
-    log_msg "Generating default config (first run)..."
+    log_msg "Generating default config (first run / upgrade)..."
     cat > "${CONFIG_FILE}" <<'EOF'
 {
   "version": "1.0",
@@ -72,31 +98,116 @@ EOF
     log_msg "Default config written to ${CONFIG_FILE}"
 }
 
-# 生成 / 复用鉴权 Token
+# 生成 / 迁移 / 复用鉴权 Token
+# v1.0.7+ 升级：检测旧版（v1.0）auth.json 并迁移到新版（v1.1）
+# 旧版：{"token": "<plain>", "version": "1.0"}（v1.0.0~v1.0.6 装的代码生成）
+# 新版：{"token_hash": "<sha256>", "token_plain": "<plain>", "init_mode_hours": 1,
+#        "initialized_at": <ts>, "version": "1.1"}（v1.0.6 server.js 期待）
+# 迁移策略：保留旧 token（重命名为 token_plain），计算 sha256 作为 token_hash，
+#          写入新格式 + init_mode=true 1h 宽限（用户用旧 token 仍能登录）
 ensure_auth_token() {
     local auth_file="${AUTH_FILE}"
-    if [ -f "${auth_file}" ]; then
-        return 0
-    fi
-    log_msg "Generating auth token (first run)..."
     local token
-    token=$(node -e "process.stdout.write(require('crypto').randomBytes(24).toString('base64url'))")
-    if [ -z "$token" ]; then
+    local token_hash
+    local created_at
+    local initialized_at
+    local existing_version
+
+    created_at=$(date -Iseconds)
+    # node 毫秒时间戳（fallback 到 shell 秒*1000）
+    initialized_at=$(node -e "process.stdout.write(String(Date.now()))" 2>/dev/null)
+    if [ -z "${initialized_at}" ]; then
+        initialized_at=$(( $(date +%s) * 1000 ))
+    fi
+
+    if [ -f "${auth_file}" ]; then
+        # 检测已有 auth.json 的版本
+        existing_version=$(grep -oP '"version"\s*:\s*"\K[^"]+' "${auth_file}" 2>/dev/null | head -1)
+
+        if [ "${existing_version}" = "1.1" ]; then
+            # 已经是新版（v1.0.7+ 装过），不重复迁移
+            return 0
+        fi
+
+        # 旧版（v1.0）迁移：保留旧 token
+        local old_token
+        old_token=$(grep -oP '"token"\s*:\s*"\K[^"]+' "${auth_file}" 2>/dev/null | head -1)
+        if [ -n "${old_token}" ]; then
+            token="${old_token}"
+            # 计算 sha256 hash（用 node 确保一致）
+            token_hash=$(printf '%s' "${token}" | node -e "
+                const crypto = require('crypto');
+                const buf = [];
+                process.stdin.on('data', c => buf.push(c));
+                process.stdin.on('end', () => {
+                    const h = crypto.createHash('sha256').update(Buffer.concat(buf).toString('utf8')).digest('hex');
+                    process.stdout.write(h);
+                });
+            " 2>/dev/null)
+            if [ -z "${token_hash}" ]; then
+                log_msg "WARN: failed to hash old token, regenerating new one"
+                token=$(node -e "process.stdout.write(require('crypto').randomBytes(24).toString('base64url'))" 2>/dev/null)
+                token_hash=$(printf '%s' "${token}" | node -e "
+                    const crypto = require('crypto');
+                    const buf = [];
+                    process.stdin.on('data', c => buf.push(c));
+                    process.stdin.on('end', () => {
+                        process.stdout.write(crypto.createHash('sha256').update(Buffer.concat(buf).toString('utf8')).digest('hex'));
+                    });
+                " 2>/dev/null)
+            fi
+
+            log_msg "Migrating auth.json v1.0 -> v1.1 (preserving token)..."
+            cat > "${auth_file}" <<EOF
+{
+  "token_hash": "${token_hash}",
+  "token_plain": "${token}",
+  "init_mode_hours": 1,
+  "initialized_at": ${initialized_at},
+  "created": "${created_at}",
+  "version": "1.1"
+}
+EOF
+            chmod 600 "${auth_file}" 2>/dev/null
+            log_msg "Auth token migrated. Existing token still valid for 1h init mode: ${token}"
+            return 0
+        fi
+
+        # 旧版但没 token 字段（异常）→ 删除重新生成
+        log_msg "WARN: existing auth.json has no token, regenerating..."
+        rm -f "${auth_file}"
+    fi
+
+    # 新装 / 重装：生成新 token + 新格式
+    log_msg "Generating auth token (first run)..."
+    token=$(node -e "process.stdout.write(require('crypto').randomBytes(24).toString('base64url'))" 2>/dev/null)
+    if [ -z "${token}" ]; then
         log_msg "ERROR: failed to generate auth token"
         return 1
     fi
-    local created_at
-    created_at=$(date -Iseconds)
+
+    token_hash=$(printf '%s' "${token}" | node -e "
+        const crypto = require('crypto');
+        const buf = [];
+        process.stdin.on('data', c => buf.push(c));
+        process.stdin.on('end', () => {
+            process.stdout.write(crypto.createHash('sha256').update(Buffer.concat(buf).toString('utf8')).digest('hex'));
+        });
+    " 2>/dev/null)
+
     cat > "${auth_file}" <<EOF
 {
-  "token": "${token}",
+  "token_hash": "${token_hash}",
+  "token_plain": "${token}",
+  "init_mode_hours": 1,
+  "initialized_at": ${initialized_at},
   "created": "${created_at}",
-  "version": "1.0"
+  "version": "1.1"
 }
 EOF
     chmod 600 "${auth_file}" 2>/dev/null
     log_msg "============================================================"
-    log_msg "  AUTH TOKEN GENERATED (v1.0.0+):"
+    log_msg "  AUTH TOKEN GENERATED (v1.0.7+):"
     log_msg "  ${token}"
     log_msg "  Please enter this token on the login page."
     log_msg "============================================================"
