@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#1a1a1a">
+    <title>进程管理 - 飞牛 fnOS</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <!-- 登录页 -->
+    <div id="login-page" class="page">
+        <div class="login-card">
+            <div class="logo">🛡️</div>
+            <h1>进程管理</h1>
+            <p class="subtitle">飞牛 fnOS 进程 / 端口 / 服务管家</p>
+            <p class="hint">首次启动的鉴权 Token 在应用的 <code>info.log</code> 里</p>
+            <input type="password" id="login-token" placeholder="粘贴鉴权 Token" autocomplete="off">
+            <button id="login-btn" class="primary">登 录</button>
+            <p id="login-error" class="error"></p>
+        </div>
+    </div>
+
+    <!-- 主界面 -->
+    <div id="main-page" class="page hidden">
+        <header class="topbar">
+            <div class="brand">
+                <span class="logo-sm">🛡️</span>
+                <span>进程管理</span>
+            </div>
+            <div class="topbar-stats" id="topbar-stats">
+                <span class="stat" title="CPU 核心">CPU <b id="stat-cpu">-</b>%</span>
+                <span class="stat" title="内存使用">MEM <b id="stat-mem">-</b>%</span>
+                <span class="stat" title="监听端口">PORT <b id="stat-ports">-</b></span>
+                <span class="stat" title="服务数量">SVC <b id="stat-svcs">-</b></span>
+                <span class="stat" title="进程总数">PROC <b id="stat-procs">-</b></span>
+            </div>
+            <div class="topbar-actions">
+                <button id="refresh-btn" title="立即刷新">🔄</button>
+                <button id="logout-btn" title="注销">🚪</button>
+            </div>
+        </header>
+
+        <nav class="tabs">
+            <button class="tab active" data-tab="processes">进程</button>
+            <button class="tab" data-tab="ports">端口</button>
+            <button class="tab" data-tab="services">服务</button>
+            <button class="tab" data-tab="system">系统</button>
+            <button class="tab" data-tab="whitelist">白名单</button>
+        </nav>
+
+        <!-- 进程 Tab -->
+        <section id="tab-processes" class="tab-content">
+            <div class="toolbar">
+                <input type="text" id="proc-search" placeholder="搜索 PID / 用户 / 命令...">
+                <select id="proc-sort">
+                    <option value="cpu">CPU</option>
+                    <option value="mem">内存</option>
+                    <option value="pid">PID</option>
+                    <option value="user">用户</option>
+                    <option value="name">名称</option>
+                </select>
+                <select id="proc-user-filter">
+                    <option value="">所有用户</option>
+                </select>
+                <label class="checkbox">
+                    <input type="checkbox" id="proc-auto-refresh" checked> 自动刷新 (3s)
+                </label>
+            </div>
+            <div class="table-wrap">
+                <table class="proc-table">
+                    <thead>
+                        <tr>
+                            <th class="col-pid">PID</th>
+                            <th class="col-user">用户</th>
+                            <th class="col-cpu">CPU%</th>
+                            <th class="col-mem">MEM%</th>
+                            <th class="col-mem">RSS</th>
+                            <th class="col-time">启动</th>
+                            <th class="col-cmd">命令</th>
+                            <th class="col-ports">端口</th>
+                            <th class="col-action">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="proc-tbody"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- 端口 Tab -->
+        <section id="tab-ports" class="tab-content hidden">
+            <div class="toolbar">
+                <input type="text" id="port-search" placeholder="搜索端口 / 进程...">
+                <label class="checkbox">
+                    <input type="checkbox" id="port-auto-refresh" checked> 自动刷新 (3s)
+                </label>
+            </div>
+            <div class="table-wrap">
+                <table class="port-table">
+                    <thead>
+                        <tr>
+                            <th>端口</th>
+                            <th>协议</th>
+                            <th>地址</th>
+                            <th>状态</th>
+                            <th>进程</th>
+                            <th>PID</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="port-tbody"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- 服务 Tab -->
+        <section id="tab-services" class="tab-content hidden">
+            <div class="toolbar">
+                <input type="text" id="svc-search" placeholder="搜索服务名 / 描述...">
+                <select id="svc-state">
+                    <option value="">所有</option>
+                    <option value="active">运行中</option>
+                    <option value="inactive">已停止</option>
+                    <option value="failed">失败</option>
+                </select>
+                <label class="checkbox">
+                    <input type="checkbox" id="svc-auto-refresh" checked> 自动刷新 (5s)
+                </label>
+            </div>
+            <div class="table-wrap">
+                <table class="svc-table">
+                    <thead>
+                        <tr>
+                            <th>服务</th>
+                            <th>状态</th>
+                            <th>Main PID</th>
+                            <th>描述</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="svc-tbody"></tbody>
+                </table>
+            </div>
+            <div id="svc-logs" class="logs-panel hidden">
+                <div class="logs-head">
+                    <span id="svc-logs-title">服务日志</span>
+                    <button id="svc-logs-close">×</button>
+                </div>
+                <pre id="svc-logs-body"></pre>
+            </div>
+        </section>
+
+        <!-- 系统 Tab -->
+        <section id="tab-system" class="tab-content hidden">
+            <div class="system-grid" id="system-grid"></div>
+        </section>
+
+        <!-- 白名单 Tab -->
+        <section id="tab-whitelist" class="tab-content hidden">
+            <p class="hint">受保护的进程 / 用户 / 端口：白名单内默认禁止杀，需 <code>confirm: "FORCE"</code> 才强杀。</p>
+            <div class="whitelist-form">
+                <label>
+                    <span>受保护的 PID（每行一个）</span>
+                    <textarea id="wl-pids" rows="4" placeholder="1&#10;2"></textarea>
+                </label>
+                <label>
+                    <span>受保护的用户（每行一个）</span>
+                    <textarea id="wl-users" rows="4" placeholder="root&#10;proc_guardian"></textarea>
+                </label>
+                <label>
+                    <span>受保护的进程名（每行一个）</span>
+                    <textarea id="wl-process_names" rows="8" placeholder="systemd&#10;sshd&#10;nginx"></textarea>
+                </label>
+                <label>
+                    <span>受保护的 cmdline 关键字（每行一个）</span>
+                    <textarea id="wl-cmdline_keywords" rows="6" placeholder="/lib/systemd/&#10;/var/apps/trim."></textarea>
+                </label>
+                <label>
+                    <span>受保护的端口（每行一个）</span>
+                    <textarea id="wl-ports" rows="4" placeholder="22&#10;80"></textarea>
+                </label>
+                <div class="form-actions">
+                    <button id="wl-save" class="primary">保存白名单</button>
+                    <button id="wl-reload">重新加载</button>
+                    <span id="wl-status"></span>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- 确认弹窗 -->
+    <div id="modal-confirm" class="modal hidden">
+        <div class="modal-box">
+            <h3 id="modal-title">确认操作</h3>
+            <p id="modal-body">...</p>
+            <div class="modal-actions">
+                <button id="modal-cancel">取消</button>
+                <button id="modal-ok" class="danger">确认</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast" class="toast hidden"></div>
+
+    <script src="/lib/api.js"></script>
+    <script src="/lib/ui.js"></script>
+    <script src="/lib/app.js"></script>
+</body>
+</html>

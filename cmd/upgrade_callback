@@ -1,0 +1,32 @@
+#!/bin/bash
+# 升级回调：清理旧进程让新版本接管端口
+
+LOG_FILE="${TRIM_PKGVAR}/info.log"
+PID_FILE="${TRIM_PKGVAR}/app.pid"
+
+log_msg() {
+    [ -n "${LOG_FILE}" ] && [ -d "$(dirname ${LOG_FILE})" ] && \
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - [upgrade] $1" >> ${LOG_FILE} 2>/dev/null
+}
+
+log_msg "Upgrade: cleanup old proc-guardian processes"
+
+# 按 PID 文件精确杀
+if [ -f "${PID_FILE}" ]; then
+    local_pid=$(head -n 1 "${PID_FILE}" | tr -d '[:space:]')
+    if [ -n "${local_pid}" ] && kill -0 "${local_pid}" 2>/dev/null; then
+        kill -TERM "${local_pid}" 2>/dev/null
+        sleep 1
+        kill -KILL "${local_pid}" 2>/dev/null && log_msg "Killed old node pid ${local_pid}" || true
+    fi
+    rm -f "${PID_FILE}"
+fi
+
+# 兜底：杀任何用户的 proc-guardian 残留
+pkill -KILL -u proc_guardian -f "node server.js" 2>/dev/null || true
+
+# 兜底：杀占用 8877 的进程
+pid_8877=$(ss -tlnp 2>/dev/null | grep ':8877 ' | grep -oP 'pid=\K[0-9]+' | head -1)
+[ -n "${pid_8877}" ] && kill -KILL "${pid_8877}" 2>/dev/null || true
+
+exit 0

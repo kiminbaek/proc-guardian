@@ -1,0 +1,307 @@
+#!/bin/bash
+# proc-guardian 生命周期管理 v1.0.0
+
+LOG_FILE="${TRIM_PKGVAR}/info.log"
+PID_FILE="${TRIM_PKGVAR}/app.pid"
+AUTH_FILE="${TRIM_PKGVAR}/auth.json"
+CONFIG_FILE="${TRIM_PKGVAR}/config.json"
+PORT="${TRIM_PORT:-8877}"
+
+# Node.js 运行时（fnOS 系统依赖装在固定路径）
+export PATH=/var/apps/nodejs_v22/target/bin:/usr/local/bin:/usr/bin:/bin:$PATH
+SERVER_DIR="${TRIM_APPDEST}/server"
+
+# 必须：把 TRIM_* 传给 Node.js 子进程
+export TRIM_PKGVAR
+export TRIM_APPDEST
+export TRIM_TEMP_LOGFILE="${LOG_FILE}"
+export PORT
+
+log_msg() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> ${LOG_FILE}
+}
+
+ensure_dirs() {
+    mkdir -p "${TRIM_PKGVAR}"
+}
+
+# 首次启动生成默认配置
+ensure_default_config() {
+    if [ -f "${CONFIG_FILE}" ]; then
+        return 0
+    fi
+    log_msg "Generating default config (first run)..."
+    cat > "${CONFIG_FILE}" <<'EOF'
+{
+  "version": "1.0",
+  "whitelist": {
+    "pids": [1, 2],
+    "users": ["root", "proc_guardian"],
+    "process_names": [
+      "systemd", "init", "kthreadd", "ksoftirqd", "migration",
+      "sshd", "sshd-session", "ssh",
+      "trim_app_center", "trim_paneld", "trim.helper", "trim_",
+      "nginx", "postgres", "smbd", "nmbd", "rpcbind", "dbus-daemon",
+      "systemd-journald", "systemd-logind", "systemd-udevd",
+      "systemd-resolved", "systemd-networkd", "systemd-timesyncd",
+      "networkd-dispatcher", "polkitd", "chronyd", "rsyslogd",
+      "fcron", "cron", "atd", "fail2ban-server",
+      "fnOs", "fnos-", "webUI",
+      "qwenpaw", "QwenPaw", "qwenpaw-cli",
+      "sandbox-init", "sandbox-shell"
+    ],
+    "cmdline_keywords": [
+      "/trim_", "/trim.", "/lib/systemd/", "/sbin/init",
+      "/usr/bin/sshd", "/usr/sbin/sshd",
+      "/var/apps/trim.openclaw/", "/var/apps/qwenpaw/",
+      "/opt/qwenpaw/"
+    ]
+  },
+  "ui": {
+    "refresh_interval_ms": 3000,
+    "page_size": 200,
+    "default_sort": "cpu"
+  },
+  "auth": {
+    "max_failures": 5,
+    "lockout_minutes": 5
+  }
+}
+EOF
+    chmod 600 "${CONFIG_FILE}" 2>/dev/null
+    log_msg "Default config written to ${CONFIG_FILE}"
+}
+
+# 生成 / 复用鉴权 Token
+ensure_auth_token() {
+    local auth_file="${AUTH_FILE}"
+    if [ -f "${auth_file}" ]; then
+        return 0
+    fi
+    log_msg "Generating auth token (first run)..."
+    local token
+    token=$(node -e "process.stdout.write(require('crypto').randomBytes(24).toString('base64url'))")
+    if [ -z "$token" ]; then
+        log_msg "ERROR: failed to generate auth token"
+        return 1
+    fi
+    local created_at
+    created_at=$(date -Iseconds)
+    cat > "${auth_file}" <<EOF
+{
+  "token": "${token}",
+  "created": "${created_at}",
+  "version": "1.0"
+}
+EOF
+    chmod 600 "${auth_file}" 2>/dev/null
+    log_msg "============================================================"
+    log_msg "  AUTH TOKEN GENERATED (v1.0.0+):"
+    log_msg "  ${token}"
+    log_msg "  Please enter this token on the login page."
+    log_msg "============================================================"
+    return 0
+}
+
+# v1.0.3+ 关键修复：fnOS 应用中心状态机 bug
+# 应用 install 后 fnOS 会在 appcenter DB 里写 status='start'，但 install 自动起的进程
+# 不会自动置 status='running'。用户点"启用"时 fnOS 看到 status='start' 试图启动，
+# 但端口已被自己人占着 → 报"端口被占用" → 死锁。
+# 修复：start 启动 node 后，自动 UPDATE appcenter DB 把 status 置 'running'。
+#      uninstall 时反向置 'stop'。
+sync_appcenter_status() {
+    local target_status="$1"  # running | stop | start
+    local is_stop_val="false"
+    [ "$target_status" = "stop" ] && is_stop_val="true"
+
+    # 找 postgres 用户 / 数据库（fnOS 默认 postgresql + appcenter DB）
+    if ! command -v psql >/dev/null 2>&1; then
+        log_msg "WARN: psql not found, skip appcenter sync"
+        return 0
+    fi
+    if ! command -v sudo >/dev/null 2>&1; then
+        log_msg "WARN: sudo not found, skip appcenter sync"
+        return 0
+    fi
+
+    # appname 从 manifest 读（fnOS 把它放在 /vol3/@appcenter/<appname>/manifest）
+    local appname="proc-guardian"
+    if [ -f "${TRIM_APPDEST}/../manifest" ]; then
+        appname=$(grep '^appname' "${TRIM_APPDEST}/../manifest" 2>/dev/null | awk -F'=' '{print $2}' | tr -d ' \t')
+    fi
+    [ -z "${appname}" ] && appname="proc-guardian"
+
+    local sql="UPDATE app SET status='${target_status}', is_stop=${is_stop_val} WHERE app_name='${appname}';"
+
+    # 写 tmp sql 文件用 sudo -u postgres 跑（peer auth 不需要密码）
+    local tmpf
+    tmpf=$(mktemp /tmp/.proc_guardian_db.XXXXXX.sql) || { log_msg "WARN: mktemp failed"; return 0; }
+    echo "${sql}" > "${tmpf}"
+    chmod 600 "${tmpf}"
+
+    if sudo -n -u postgres psql -d appcenter -f "${tmpf}" >/dev/null 2>&1; then
+        log_msg "Synced appcenter status='${target_status}' for app_name='${appname}'"
+    else
+        log_msg "WARN: appcenter sync failed (psql auth/conn); status remains unchanged"
+    fi
+    rm -f "${tmpf}"
+}
+
+start() {
+    log_msg "Starting proc-guardian on port ${PORT}..."
+
+    # v1.0.2 终极修复：fnOS 应用中心状态机 bug
+    # 现象：fnOS install 流程会自动调 main start 启动 node 进程，
+    #       但 fnOS 状态机不认这次启动 → 应用中心仍显示"启用"按钮。
+    #       用户再点"启用" → main start 看到端口被自己人占着 → fnOS 报"端口被占用" → 死锁。
+    #
+    # 解决：start 里如果检测到 8877 端口被任何"自己人"（node server.js 进程）占着，
+    #       先 kill 它（连同 PID_FILE 记录）→ 等待端口释放 → 重新启动
+    #       → 进程是这次 start 起的，fnOS 状态机能正确识别。
+    #
+    # 判定"自己人"标准：cmdline 含 "node server.js" + cwd 含 "proc-guardian"
+    # PID_FILE 记录的 PID 优先（更精确）；ss 查到的也算。
+
+    # 1) 收集所有"可能需要 kill"的目标
+    local kill_pids=()
+    # 1a) PID_FILE 里的 PID
+    if [ -f "${PID_FILE}" ]; then
+        local pidf_pid
+        pidf_pid=$(head -n 1 "${PID_FILE}" | tr -d '[:space:]')
+        if [ -n "${pidf_pid}" ] && kill -0 "${pidf_pid}" 2>/dev/null; then
+            kill_pids+=("${pidf_pid}")
+        fi
+        rm -f "${PID_FILE}"
+    fi
+    # 1b) ss 查 8877 端口占用者，且确认是"自己人"
+    local ss_pid proc_cmdline proc_cwd
+    ss_pid=$(ss -tlnp 2>/dev/null | grep ":${PORT} " | grep -oP 'pid=\K[0-9]+' | head -1)
+    if [ -n "${ss_pid}" ] && kill -0 "${ss_pid}" 2>/dev/null; then
+        proc_cmdline=$(tr '\0' ' ' < /proc/${ss_pid}/cmdline 2>/dev/null)
+        proc_cwd=$(readlink /proc/${ss_pid}/cwd 2>/dev/null)
+        if echo "${proc_cmdline}" | grep -q "node server.js" && \
+           echo "${proc_cwd}" | grep -q "proc-guardian"; then
+            # 避免重复加入
+            local already=0
+            for kp in "${kill_pids[@]}"; do
+                [ "${kp}" = "${ss_pid}" ] && already=1
+            done
+            [ "${already}" = "0" ] && kill_pids+=("${ss_pid}")
+            log_msg "Found self process on port ${PORT}: pid=${ss_pid} cwd=${proc_cwd}"
+        else
+            # 端口被其他进程占着（不是自己人）→ 报错退出
+            log_msg "ERROR: port ${PORT} held by other process pid=${ss_pid} cmdline='${proc_cmdline}' cwd='${proc_cwd}'"
+            return 1
+        fi
+    fi
+
+    # 2) 杀掉所有"自己人"（优雅 → 强杀）
+    if [ ${#kill_pids[@]} -gt 0 ]; then
+        log_msg "Killing ${#kill_pids[@]} self process(es) to release port: ${kill_pids[*]}"
+        for kp in "${kill_pids[@]}"; do
+            kill -TERM "${kp}" 2>/dev/null || true
+        done
+        sleep 1
+        for kp in "${kill_pids[@]}"; do
+            if kill -0 "${kp}" 2>/dev/null; then
+                kill -KILL "${kp}" 2>/dev/null && log_msg "Force killed pid ${kp}" || true
+            fi
+        done
+        # 等端口释放
+        local i=0
+        while [ $i -lt 20 ]; do
+            if ! ss -tlnp 2>/dev/null | grep -q ":${PORT} "; then
+                log_msg "Port ${PORT} released"
+                break
+            fi
+            sleep 0.5
+            i=$((i+1))
+        done
+    fi
+
+    # 3) 兜底：杀任何用户的 proc-guardian 残留（按用户名 + 路径）
+    pkill -KILL -u proc_guardian -f "node server.js" 2>/dev/null || true
+    pkill -KILL -f "/vol3/@appcenter/proc-guardian/server/server.js" 2>/dev/null || true
+
+    # 4) 启动前准备
+    ensure_dirs
+    ensure_default_config
+    ensure_auth_token || return 1
+
+    cd "${SERVER_DIR}" || { log_msg "ERROR: server dir not found: ${SERVER_DIR}"; return 1; }
+
+    # 5) 启动 node 后台
+    nohup node server.js >> "${LOG_FILE}" 2>&1 &
+    local pid=$!
+    echo "${pid}" > "${PID_FILE}"
+    log_msg "Started node server.js pid=${pid}"
+
+    # 6) 等待端口起来
+    local i=0
+    while [ $i -lt 20 ]; do
+        if ss -tlnp 2>/dev/null | grep -q ":${PORT} "; then
+            log_msg "Port ${PORT} is listening"
+            # v1.0.3+ 关键修复：端口起来了 → 同步 appcenter DB 状态为 running
+            # 让 fnOS 应用中心识别"已启用"（解决 install 自动起 + 状态卡死 bug）
+            sync_appcenter_status "running"
+            return 0
+        fi
+        sleep 0.5
+        i=$((i+1))
+    done
+    log_msg "WARN: port ${PORT} not listening after 10s, check logs"
+    return 0
+}
+
+stop() {
+    log_msg "Stopping proc-guardian..."
+
+    # v1.0.3+ 同步 appcenter DB 状态为 stop
+    sync_appcenter_status "stop"
+
+    if [ -f "${PID_FILE}" ]; then
+        local pid
+        pid=$(head -n 1 "${PID_FILE}" | tr -d '[:space:]')
+        if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+            # v1.0.0+ 修复：先 SIGTERM 优雅退出，超时再 SIGKILL
+            kill -TERM "${pid}" 2>/dev/null
+            local i=0
+            while [ $i -lt 10 ] && kill -0 "${pid}" 2>/dev/null; do
+                sleep 0.5
+                i=$((i+1))
+            done
+            if kill -0 "${pid}" 2>/dev/null; then
+                kill -KILL "${pid}" 2>/dev/null
+                log_msg "Force killed node pid ${pid}"
+            else
+                log_msg "Gracefully stopped node pid ${pid}"
+            fi
+        fi
+        rm -f "${PID_FILE}"
+    fi
+    # 兜底：按用户杀残留（避免半死进程占端口）
+    pkill -KILL -u proc_guardian -f "node server.js" 2>/dev/null || true
+}
+
+# v1.0.4 关键修复：fnOS 应用中心启用前必先调 main status 检查（fnnas_dev_notes.md 3.2 节）
+# 漏写 status case 的真根因 = v1.0.0~v1.0.3 装上后 fnOS 报"端口被占用"死锁（M107）
+status() {
+    # 跑着 exit 0（fnOS 认"已运行"），没跑 exit 3（fnOS 认"未运行"）
+    if [ -f "${PID_FILE}" ]; then
+        local pid
+        pid=$(head -n 1 "${PID_FILE}" | tr -d '[:space:]')
+        if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+            exit 0
+        fi
+    fi
+    exit 3
+}
+
+case "$1" in
+    start)   start ;;
+    stop)    stop ;;
+    restart) stop; sleep 1; start ;;
+    status)  status ;;
+    *)       echo "Usage: $0 {start|stop|restart|status}"; exit 1 ;;
+esac
+exit $?

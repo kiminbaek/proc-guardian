@@ -1,0 +1,21 @@
+#!/bin/bash
+# 安装回调：清理上次安装的残留（防止升级时端口被占）
+
+LOG_FILE="${TRIM_PKGVAR}/info.log"
+
+log_msg() {
+    [ -n "${LOG_FILE}" ] && [ -d "$(dirname ${LOG_FILE})" ] && \
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - [install] $1" >> ${LOG_FILE} 2>/dev/null
+}
+
+log_msg "Install: cleaning up leftover processes from previous install"
+
+# 兜底：杀任何用户的 proc-guardian 残留 node 进程
+pkill -KILL -u proc_guardian -f "node server.js" 2>/dev/null || true
+# 兜底：杀占用 8877 端口的进程（防止半死状态）
+pid_8877=$(ss -tlnp 2>/dev/null | grep ':8877 ' | grep -oP 'pid=\K[0-9]+' | head -1)
+if [ -n "${pid_8877}" ]; then
+    kill -KILL "${pid_8877}" 2>/dev/null && log_msg "Killed leftover pid ${pid_8877} on port 8877" || true
+fi
+
+exit 0

@@ -1,0 +1,8 @@
+{
+    "data-share": {
+        "shares": [{
+            "name": "proc_guardian_config",
+            "permission": { "rw": ["proc_guardian"] }
+        }]
+    }
+}

@@ -1,0 +1,38 @@
+# ========================================
+# proc-guardian .gitignore
+# ========================================
+# 参考 xray-proxy-native 实战标准（06-04 v1.13.0）
+# ========================================
+
+# Build artifacts（打 fpk 时的临时/最终产物）
+app.tgz
+*.fpk
+
+# Backups
+backup/
+*.bak
+*.bak.*
+*.deprecated.*
+
+# fnpack 临时目录（用 TMPDIR 改到源码外）
+proc-guardian-build/
+/tmp/fnpack.*
+
+# System / editor
+.DS_Store
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Logs（应用日志在 @appdata 不在源码里，留这条是占位）
+*.log
+
+# ========================================
+# 跟踪：
+# - 全部源码（app/ 含 server/node_modules ~720KB 一次性 commit）
+# - LICENSE（MIT）
+# - README.md
+# - manifest / cmd/ / config/ / ICON.PNG / ICON_256.PNG / app/ui/config
+# ========================================

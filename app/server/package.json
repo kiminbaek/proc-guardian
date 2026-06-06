@@ -1,0 +1,13 @@
+{
+  "name": "proc-guardian-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "飞牛 fnOS 进程 / 端口 / 服务管家 - Node.js 后端",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}

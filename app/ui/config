@@ -1,0 +1,13 @@
+{
+    ".url": {
+        "proc-guardian.Application": {
+            "title": "进程管理",
+            "icon": "ICON.PNG",
+            "type": "url",
+            "protocol": "http",
+            "port": "8877",
+            "url": "/",
+            "allUsers": true
+        }
+    }
+}
