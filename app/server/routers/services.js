@@ -1,43 +1,65 @@
 // /api/services 路由
+// v1.0.6 BUG 修复：clearCache 移到 try 外 + 危险操作必填 confirm
+
 const express = require('express');
 const router = express.Router();
+const { execSync } = require('child_process');
+const services = require('../services');
 
-const svcMod = require('../services');
+function safeExec(cmd, timeout = 5000) {
+    try {
+        return execSync(cmd, { encoding: 'utf8', timeout, maxBuffer: 4 * 1024 * 1024 }).trim();
+    } catch (e) {
+        return '';
+    }
+}
 
-// GET /api/services
-router.get('/', (req, res) => {
-    const services = svcMod.getAllServices();
-    res.json({ ok: true, total: services.length, services });
+// === BUG #32 修复：危险操作必填 confirm ===
+const DANGEROUS_ACTIONS = new Set(['start', 'stop', 'restart', 'enable', 'disable']);
+
+router.get('/', async (req, res) => {
+    try {
+        const data = await services.listUnits();
+        res.json({ ok: true, ...data });
+    } catch (e) {
+        res.status(500).json({ ok: false, error: 'list_failed' });
+    }
 });
 
-// GET /api/services/:unit/logs?lines=100
-router.get('/:unit/logs', (req, res) => {
-    const unit = req.params.unit;
-    if (!/^[\w@.-]+\.service$/.test(unit)) {
-        return res.status(400).json({ ok: false, error: 'invalid_unit_name' });
-    }
-    const lines = Math.min(2000, parseInt(req.query.lines) || 100);
+router.get('/status/:name', async (req, res) => {
     try {
-        const logs = svcMod.getServiceLogs(unit, lines);
-        res.json({ ok: true, unit, lines, logs });
+        const status = await services.getStatus(req.params.name);
+        res.json({ ok: true, name: req.params.name, status });
     } catch (e) {
-        res.status(500).json({ ok: false, error: e.message });
+        res.status(500).json({ ok: false, error: 'status_failed' });
     }
 });
 
-// POST /api/services/action { unit, action }
-router.post('/action', (req, res) => {
-    const unit = (req.body.unit || '').toString();
-    const action = (req.body.action || '').toString();
-    if (!unit || !action) {
-        return res.status(400).json({ ok: false, error: 'missing_unit_or_action' });
+router.post('/action', async (req, res) => {
+    const { action, name, confirm } = req.body || {};
+
+    if (!action || !name) {
+        return res.status(400).json({ ok: false, error: 'missing_action_or_name' });
     }
+
+    // === BUG #32 修复：危险操作必须 confirm=true ===
+    if (DANGEROUS_ACTIONS.has(action) && confirm !== true) {
+        return res.status(400).json({
+            ok: false,
+            error: 'confirm_required',
+            hint: `action '${action}' requires confirm=true in body`
+        });
+    }
+
     try {
-        const result = svcMod.serviceAction(unit, action);
-        svcMod.clearCache();
-        res.json({ ok: true, ...result });
+        const result = await services.action(name, action);
+        // === BUG #8 修复：clearCache 移到 try 外（catch 也清）===
+        services.clearCache();
+        res.json({ ok: true, action, name, result });
     } catch (e) {
-        res.status(500).json({ ok: false, error: e.message });
+        // 失败也清缓存
+        services.clearCache();
+        res.status(500).json({ ok: false, error: 'action_failed', detail: e.message });
     }
 });
 

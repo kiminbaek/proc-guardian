@@ -1,16 +1,25 @@
 // proc-guardian 前端 API 封装
+// v1.0.6 BUG #13 修复：token 改用 sessionStorage（关浏览器即失效）
 (function() {
     'use strict';
 
     const TOKEN_KEY = 'proc_guardian_token';
+    // === BUG #13 修复：sessionStorage 替代 localStorage ===
+    // 好处：XSS 风险降低（关浏览器自动失效）、CSRF 攻击面减少
+    // 代价：用户每次开新浏览器标签/窗口都要重新登录（可接受）
+    const storage = window.sessionStorage;
 
     const Api = {
         getToken() {
-            return localStorage.getItem(TOKEN_KEY) || '';
+            return storage.getItem(TOKEN_KEY) || '';
         },
         setToken(t) {
-            if (t) localStorage.setItem(TOKEN_KEY, t);
-            else localStorage.removeItem(TOKEN_KEY);
+            if (t) storage.setItem(TOKEN_KEY, t);
+            else storage.removeItem(TOKEN_KEY);
+        },
+        // === BUG #20 修复：登出清 token ===
+        clearToken() {
+            storage.removeItem(TOKEN_KEY);
         },
 
         _buildHeaders(extra) {
@@ -45,6 +54,7 @@
 
         // 业务封装
         login(token)        { return this.post('/api/auth/login', { token }); },
+        logout()            { return this.post('/api/auth/logout', {}); },
         authStatus()        { return this.get('/api/auth/status'); },
         processes(params)   {
             const q = new URLSearchParams(params || {}).toString();

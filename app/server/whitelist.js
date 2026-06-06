@@ -1,5 +1,6 @@
 // proc-guardian 白名单校验
 // API 层强制拦截：PID 1、白名单内 PID/用户/进程名/cmdline 关键字
+// v1.0.6：新增 load() 函数 + 加载失败不写回默认值
 
 const fs = require('fs');
 const path = require('path');
@@ -11,6 +12,14 @@ let cache = null;
 let cacheTime = 0;
 const CACHE_TTL_MS = 5000;
 
+const DEFAULT_WHITELIST = {
+    pids: [1, 2],
+    users: [],
+    process_names: [],
+    cmdline_keywords: [],
+    ports: []
+};
+
 function readConfig() {
     const now = Date.now();
     if (cache && (now - cacheTime) < CACHE_TTL_MS) return cache;
@@ -20,7 +29,24 @@ function readConfig() {
         cacheTime = now;
         return cache;
     } catch (e) {
-        return { whitelist: { pids: [1, 2], users: [], process_names: [], cmdline_keywords: [] } };
+        // 加载失败：返内存默认值（不写回 config.json）
+        return { whitelist: { ...DEFAULT_WHITELIST } };
+    }
+}
+
+// === BUG 修复：暴露 load 函数给 routers 调用 ===
+function load(configFile) {
+    const file = configFile || CONFIG_FILE;
+    try {
+        const raw = fs.readFileSync(file, 'utf8');
+        const data = JSON.parse(raw);
+        // 合并默认值（确保所有字段都存在）
+        return {
+            ...DEFAULT_WHITELIST,
+            ...(data.whitelist || data)
+        };
+    } catch (e) {
+        return { ...DEFAULT_WHITELIST };
     }
 }
 
@@ -84,6 +110,7 @@ function checkPort(port) {
 
 module.exports = {
     readConfig,
+    load,
     clearCache,
     checkProcess,
     checkPort

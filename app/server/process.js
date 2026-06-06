@@ -87,14 +87,34 @@ function getProcessByPid(pid) {
 }
 
 function killProcess(pid, signal = 'SIGTERM', force = false) {
-    if (Number(pid) === 1) throw new Error('cannot_kill_pid_1');
-    if (Number(pid) === 2) throw new Error('cannot_kill_pid_2');
+    const nPid = Number(pid);
+    if (nPid === 1) throw new Error('cannot_kill_pid_1');
+    if (nPid === 2) throw new Error('cannot_kill_pid_2');
+    if (!Number.isInteger(nPid) || nPid < 1) {
+        throw new Error('invalid_pid');
+    }
+
+    // === BUG #48 修复：先检查进程存在不存在 ===
+    if (!existsPid(nPid)) {
+        throw new Error('process_not_found');
+    }
+
     const sig = force ? 'SIGKILL' : signal;
     try {
-        process.kill(Number(pid), sig);
-        return { ok: true, pid: Number(pid), signal: sig };
+        process.kill(nPid, sig);
+        return { ok: true, pid: nPid, signal: sig };
     } catch (e) {
         throw new Error(`kill_failed: ${e.code || e.message}`);
+    }
+}
+
+function existsPid(pid) {
+    // signal 0 不发信号，只检查权限/存在
+    try {
+        process.kill(pid, 0);
+        return true;
+    } catch (e) {
+        return e.code === 'EPERM';  // EPERM 表示存在但没权限
     }
 }
 

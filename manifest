@@ -1,5 +1,5 @@
 appname               = proc-guardian
-version               = 1.0.5
+version               = 1.0.6
 display_name          = 进程管理
 desc                  = <br/>飞牛 fnOS 进程 / 端口 / 服务管家<br/>再也不用 SSH 手动 kill 端口占用的进程了。<br/><br/><br/>【核心能力】<br/><br/><br/>• <strong>进程列表</strong>：PID / 用户 / CPU / 内存 / 启动时间 / 命令 / 占用端口<br/>• <strong>端口列表</strong>：所有监听端口 + 占用进程反查<br/>• <strong>systemd 服务</strong>：启动 / 停止 / 重启 / 查看日志<br/>• <strong>安全白名单</strong>：保护系统关键进程（sshd / systemd / trim_app_center 等）<br/>• <strong>批量结束</strong>：按进程名 / 用户 / 端口一键清理<br/>• <strong>实时刷新</strong>：3 秒轮询 + SSE 推送<br/>• <strong>登录鉴权</strong>：首次启动生成 Token，5 次失败锁定 5 分钟<br/>• <strong>离线部署</strong>：原生 HTML/CSS/JS，无 CDN 依赖<br/><br/><br/>【安全设计】<br/>• API 层强制拦截 PID 1（init/systemd）<br/>• 白名单保护：内置系统关键进程，需"FORCE"二次确认才杀<br/>• 白名单可配置文件：<code>${TRIM_PKGVAR}/config.json</code> 的 <code>whitelist</code> 段
 source                = thirdparty
@@ -11,4 +11,4 @@ desktop_applaunchname = proc-guardian.Application
 service_port          = 8877
 install_dep_apps      = nodejs_v22
 os_min_version        = 0.9.27
-checksum              = eac9f31ac172bd51afde9d446203e006
+checksum              = 87ba2b7e05bd6d4b552d5fd01991e18b

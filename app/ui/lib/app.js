@@ -93,8 +93,13 @@
             t.onclick = () => switchTab(t.dataset.tab);
         });
 
-        $('logout-btn').onclick = () => {
-            Api.setToken('');
+        $('logout-btn').onclick = async () => {
+            try {
+                await Api.logout();  // 服务端清缓存（未来支持黑名单）
+            } catch (e) {
+                // 静默失败
+            }
+            Api.clearToken();
             location.reload();
         };
 
@@ -348,7 +353,8 @@
         );
         if (!ok) return;
         try {
-            await Api.serviceAction({ unit, action });
+            // === BUG #32 修复：confirm=true 告诉服务端已二次确认 ===
+            await Api.serviceAction({ unit, action, confirm: true });
             UI.toast(`已${actionText} ${unit}`, 'success');
             setTimeout(refreshServices, 800);
         } catch (e) {

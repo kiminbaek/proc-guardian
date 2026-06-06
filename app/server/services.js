@@ -1,22 +1,26 @@
 // proc-guardian systemd 服务管理
+// v1.0.6 BUG 修复：timeout 缩到 5s + list-units 失败不 cache + 错误信息完整
 
-const { execSync, exec } = require('child_process');
+const { execSync } = require('child_process');
 
 const CACHE_TTL_MS = 2000;
 let cache = null;
 let cacheTime = 0;
 
-function execSystemctl(args, timeout = 10000) {
+// === BUG #30 修复：timeout 10000 -> 5000ms（fail fast）===
+function execSystemctl(args, timeout = 5000) {
     try {
         return execSync(`systemctl ${args}`, { encoding: 'utf8', timeout });
     } catch (e) {
-        return e.stdout ? e.stdout.toString() : '';
+        // === BUG #28 修复：完整错误信息（stdout + stderr）===
+        const stdout = e.stdout ? e.stdout.toString() : '';
+        const stderr = e.stderr ? e.stderr.toString() : '';
+        // 把 stderr 拼到 stdout（不丢失信息）
+        return (stdout + (stderr ? '\n' + stderr : '')).trim();
     }
 }
 
 function parseListUnits(out) {
-    // systemctl list-units --type=service --all --no-pager
-    // 格式：UNIT LOAD ACTIVE SUB DESCRIPTION
     const lines = out.split('\n');
     const result = [];
     let inBody = false;
@@ -27,7 +31,6 @@ function parseListUnits(out) {
         const parts = line.trim().split(/\s{2,}/);
         if (parts.length < 4) continue;
         const [unit, load, active, sub, ...descParts] = parts;
-        // 抓 main pid
         const pidMatch = unit.match(/\.service$/);
         result.push({
             unit,
@@ -48,11 +51,16 @@ function getAllServices() {
     const out = execSystemctl('list-units --type=service --all --no-pager');
     const services = parseListUnits(out);
 
-    // 拿 main pid
+    // === BUG #29 修复：list-units 失败/空时返旧 cache，不更新 cacheTime（让下次重试）===
+    if (services.length === 0) {
+        return cache || [];
+    }
+
+    // 拿 main pid（只对 active 状态）
     for (const s of services) {
         if (s.active === 'active' && s.sub === 'running') {
             try {
-                const propOut = execSystemctl(`show ${s.unit} --property=MainPID --no-pager`);
+                const propOut = execSystemctl(`show ${s.unit} --property=MainPID --no-pager`, 3000);
                 const m = propOut.match(/MainPID=(\d+)/);
                 if (m && m[1] !== '0') s.main_pid = parseInt(m[1], 10);
             } catch (e) {}
@@ -65,7 +73,6 @@ function getAllServices() {
 }
 
 function serviceAction(unit, action) {
-    // action: start | stop | restart | disable | enable
     const allowed = ['start', 'stop', 'restart', 'disable', 'enable'];
     if (!allowed.includes(action)) throw new Error(`invalid_action: ${action}`);
     if (!/^[\w@.-]+\.service$/.test(unit)) throw new Error(`invalid_unit_name: ${unit}`);
@@ -97,9 +104,28 @@ function clearCache() {
     cacheTime = 0;
 }
 
+// === 兼容旧 API（routers/services.js 用了 listUnits + getStatus）===
+async function listUnits() {
+    const services = getAllServices();
+    return { services, total: services.length };
+}
+
+async function getStatus(unit) {
+    if (!/^[\w@.-]+\.service$/.test(unit)) throw new Error(`invalid_unit_name: ${unit}`);
+    const out = execSystemctl(`is-active ${unit}`, 3000);
+    return out.trim() || 'unknown';
+}
+
+async function action(unit, actionName) {
+    return serviceAction(unit, actionName);
+}
+
 module.exports = {
     getAllServices,
     serviceAction,
     getServiceLogs,
-    clearCache
+    clearCache,
+    listUnits,
+    getStatus,
+    action
 };

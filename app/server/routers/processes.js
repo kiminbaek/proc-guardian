@@ -173,7 +173,25 @@ router.post('/kill-by-name', (req, res) => {
         }
     }
 
-    res.json({ ok: true, killed, failed, skipped });
+    // === BUG #17 修复：1s 后还活着的发 SIGKILL 兜底 ===
+    if (killed.length > 0) {
+        setTimeout(() => {
+            for (const pid of killed) {
+                try {
+                    process.kill(pid, 0);  // 检查进程还在不在
+                } catch (e) {
+                    continue;  // 已退出
+                }
+                try {
+                    procMod.killProcess(pid, 'SIGKILL', true);
+                } catch (e) {
+                    // SIGKILL 失败记日志（不强阻）
+                }
+            }
+        }, 1000).unref();
+    }
+
+    res.json({ ok: true, killed, failed, skipped, force_kill_after_ms: 1000 });
 });
 
 module.exports = router;

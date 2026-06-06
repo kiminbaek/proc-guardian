@@ -1,72 +1,79 @@
-// 登录 / 注销 / 锁定状态查询（无需鉴权）
-const express = require('express');
-const crypto = require('crypto');
-const router = express.Router();
+// /api/auth 路由
+// BUG #1/#2/#3/#20 修复版 v1.0.6
 
+const express = require('express');
+const router = express.Router();
 const auth = require('../auth');
 
-function tokenHash(t) {
-    return crypto.createHash('sha256').update(t).digest('hex');
-}
+// 通过 getter 获取最新 module 变量（避免 ES6 简写求值时机错）
+const _i = () => auth._internal;
 
-// POST /api/auth/login { token }
 router.post('/login', (req, res) => {
     const ip = req.ip || req.connection.remoteAddress || 'unknown';
-    const internal = auth._internal;
 
-    if (internal.isLocked(ip)) {
+    // 锁定检查
+    if (auth.isLocked(ip)) {
         return res.status(429).json({
             ok: false,
-            error: 'too_many_failures',
-            locked_for_seconds: internal.getLockSeconds(ip)
+            error: 'too_many_attempts',
+            retry_after: auth.getLockSeconds(ip)
         });
     }
 
-    const provided = (req.body && req.body.token) || '';
+    const { token: provided } = req.body || {};
     if (!provided) {
+        auth.recordFailure(ip);
         return res.status(400).json({ ok: false, error: 'no_token' });
     }
 
-    let ok = false;
-    let needsHash = false;
-    if (internal.tokenPlain && provided === internal.tokenPlain) {
-        ok = true;
-        needsHash = true;   // 首次登录，返回 hash 让前端存
-        internal.tokenPlain = null;  // 一次性明文
-    } else if (auth.hashToken(provided) === internal.tokenHash) {
-        ok = true;
-    }
+    const internal = _i();
 
-    if (!ok) {
-        internal.recordFailure(ip);
-        // 重新查当前 ip 的失败次数（recordFailure 后 map 已更新）
-        const failCount = (require('../auth')._internal.failures.get(ip)?.count) || 0;
-        return res.status(401).json({
-            ok: false,
-            error: 'bad_token',
-            remaining_attempts: Math.max(0, 5 - failCount)
+    // === BUG #1 修复：协议统一 ===
+    // init mode 1h 内 + 明文 token 匹配 → 一次性登录
+    if (internal.initMode && internal.tokenPlain && provided === internal.tokenPlain) {
+        auth.clearFailures(ip);
+        return res.json({
+            ok: true,
+            session_token: internal.tokenHash,  // 返 hash 作为 session_token
+            init_mode: true,
+            hint: 'store session_token, never store plain token'
         });
     }
 
-    internal.clearFailures(ip);
-
-    // 返回 hash 后的 token（让前端后续用 hash 调 API）
-    if (needsHash) {
-        res.json({ ok: true, session_token: internal.tokenHash });
-    } else {
-        res.json({ ok: true });
+    // session_token (hash) 验证：直接比较（BUG #1 修复）
+    if (internal.tokenHash && provided === internal.tokenHash) {
+        auth.clearFailures(ip);
+        return res.json({
+            ok: true,
+            session_token: internal.tokenHash
+        });
     }
+
+    // 失败
+    auth.recordFailure(ip);
+    const locked = auth.isLocked(ip);
+    return res.status(401).json({
+        ok: false,
+        error: locked ? 'too_many_attempts' : 'bad_token',
+        retry_after: locked ? auth.getLockSeconds(ip) : 0
+    });
 });
 
-// GET /api/auth/status
+// 登出（BUG #20：新增端点，简单版不持久化黑名单）
+router.post('/logout', (req, res) => {
+    // 当前实现：让前端清 localStorage / sessionStorage
+    // 完整版需要 token 黑名单 + 持久化（v1.0.7+）
+    res.json({ ok: true, hint: 'frontend should clear stored token' });
+});
+
 router.get('/status', (req, res) => {
-    const ip = req.ip || req.connection.remoteAddress || 'unknown';
-    const internal = auth._internal;
+    const internal = _i();
     res.json({
         ok: true,
-        init_mode: internal.initMode,    // 启动后 1h 内为 true（用 initMode 不是 tokenPlain）
-        locked: internal.isLocked(ip),
-        locked_for_seconds: internal.getLockSeconds(ip)
+        authenticated: true,  // 已通过 authMiddleware
+        init_mode: internal.initMode,
+        server_started_at: internal.serverStartedAt,
+        uptime_seconds: Math.floor((Date.now() - internal.serverStartedAt) / 1000)
     });
 });
 
