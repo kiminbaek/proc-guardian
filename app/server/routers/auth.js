@@ -64,7 +64,7 @@ router.get('/status', (req, res) => {
     const internal = auth._internal;
     res.json({
         ok: true,
-        init_mode: !!internal.tokenPlain,    // 启动后 1h 内为 true
+        init_mode: internal.initMode,    // 启动后 1h 内为 true（用 initMode 不是 tokenPlain）
         locked: internal.isLocked(ip),
         locked_for_seconds: internal.getLockSeconds(ip)
     });

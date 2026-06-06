@@ -91,7 +91,8 @@ function authMiddleware(req, res, next) {
         // 首次启动：明文 token 比对成功 → 客户端存 hash 后走 HASH 模式
         ok = true;
         initMode = false;  // 一次性 init 模式
-    } else if (hashToken(provided) === tokenHash) {
+    } else if (provided === tokenHash) {
+        // HASH 模式：客户端发 session_token（= tokenHash）直接比对，不再 hash 一次
         ok = true;
     }
 
@@ -112,6 +113,12 @@ module.exports = {
     init,
     authMiddleware,
     hashToken,
-    // 给 login 路由用
-    _internal: { tokenHash, tokenPlain, isLocked, recordFailure, clearFailures, getLockSeconds, failures }
+    // 给 login 路由用（用 getter/setter 反映 module 变量最新值）
+    _internal: {
+        get tokenHash() { return tokenHash; },
+        get tokenPlain() { return tokenPlain; },
+        set tokenPlain(v) { tokenPlain = v; },  // login 路由清空时同步 module 变量
+        get initMode() { return initMode; },
+        isLocked, recordFailure, clearFailures, getLockSeconds, failures
+    }
 };
