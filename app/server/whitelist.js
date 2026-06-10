@@ -73,8 +73,9 @@ function checkProcess(proc) {
         return { protected: true, reason: `pid_in_whitelist` };
     }
 
-    // 3) 用户白名单
+    // 3) 用户白名单：v1.2.0 root 不作为硬保护，避免误伤 fnOS 应用
     if (Array.isArray(wl.users) && wl.users.includes(proc.user)) {
+        if (proc.user === 'root') return { protected: false, reason: 'root_soft_risk' };
         return { protected: true, reason: `user:${proc.user}` };
     }
 

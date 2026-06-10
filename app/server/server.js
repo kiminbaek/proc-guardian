@@ -1,4 +1,4 @@
-// proc-guardian 入口服务 v1.0.6
+// proc-guardian 入口服务 v1.2.0
 // 负责：注册路由 + 启动 HTTP 服务 + 优雅退出
 
 const express = require('express');
@@ -42,6 +42,8 @@ app.use('/api/ports',     require('./routers/ports'));
 app.use('/api/services',  require('./routers/services'));
 app.use('/api/system',    require('./routers/system'));
 app.use('/api/whitelist', require('./routers/whitelist'));
+app.use('/api/apps',      require('./routers/apps'));
+app.use('/api/audit',     require('./routers/auditlog'));
 
 // 静态文件
 app.use(express.static(path.join(__dirname, '..', 'ui')));
@@ -67,7 +69,7 @@ const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`[${ts}] proc-guardian listening on 0.0.0.0:${PORT}`);
     try {
         fs.appendFileSync(LOG_FILE,
-            `[${new Date().toISOString()}] [boot] proc-guardian v1.0.6 listening on ${PORT}\n`);
+            `[${new Date().toISOString()}] [boot] proc-guardian v1.2.0 listening on ${PORT}\n`);
     } catch (e) {}
 });
 

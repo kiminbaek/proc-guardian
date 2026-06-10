@@ -29,11 +29,20 @@ function getMemoryInfo() {
     const total = os.totalmem();
     const free = os.freemem();
     const used = total - free;
+    // v1.0.8 修：读 /proc/meminfo 的 MemAvailable（比 free 更准确）
+    let available = free;
+    try {
+        const meminfo = require('fs').readFileSync('/proc/meminfo', 'utf8');
+        const m = meminfo.match(/MemAvailable:\s+(\d+)\s+kB/);
+        if (m) {
+            available = parseInt(m[1], 10) * 1024;  // kB → bytes
+        }
+    } catch (e) {}
     return {
         total,        // 字节
         used,
         free,
-        available: free,  // 简化版 = free
+        available,     // 真实可用（含 cache/buffer）
         percent: total > 0 ? Math.round((used / total) * 100) : 0
     };
 }

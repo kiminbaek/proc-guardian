@@ -5,6 +5,7 @@ const express = require('express');
 const router = express.Router();
 const { execSync } = require('child_process');
 const services = require('../services');
+const audit = require('../audit');
 
 function safeExec(cmd, timeout = 5000) {
     try {
@@ -36,7 +37,8 @@ router.get('/status/:name', async (req, res) => {
 });
 
 router.post('/action', async (req, res) => {
-    const { action, name, confirm } = req.body || {};
+    const { action, confirm } = req.body || {};
+    const name = ((req.body && (req.body.name || req.body.unit)) || '').toString().trim();
 
     if (!action || !name) {
         return res.status(400).json({ ok: false, error: 'missing_action_or_name' });
@@ -55,10 +57,12 @@ router.post('/action', async (req, res) => {
         const result = await services.action(name, action);
         // === BUG #8 修复：clearCache 移到 try 外（catch 也清）===
         services.clearCache();
+        audit.append('service_action', { ...audit.fromReq(req), action, name, result: 'success' });
         res.json({ ok: true, action, name, result });
     } catch (e) {
         // 失败也清缓存
         services.clearCache();
+        audit.append('service_action', { ...audit.fromReq(req), action, name, result: 'failed', error: e.message });
         res.status(500).json({ ok: false, error: 'action_failed', detail: e.message });
     }
 });

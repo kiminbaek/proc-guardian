@@ -53,7 +53,10 @@
         del(p)    { return this._request('DELETE', p); },
 
         // 业务封装
-        login(token)        { return this.post('/api/auth/login', { token }); },
+        authMode()          { return this.get('/api/auth/mode'); },
+        setupPassword(password) { return this.post('/api/auth/setup', { password }); },
+        upgradePassword(token, password) { return this.post('/api/auth/upgrade', { token, password }); },
+        login(password)     { return this.post('/api/auth/login', { password }); },
         logout()            { return this.post('/api/auth/logout', {}); },
         authStatus()        { return this.get('/api/auth/status'); },
         processes(params)   {
@@ -63,6 +66,8 @@
         process(pid)        { return this.get('/api/processes/' + pid); },
         killProcess(p, o)   { return this.post('/api/processes/kill', o); },
         killByName(o)       { return this.post('/api/processes/kill-by-name', o); },
+        apps()              { return this.get('/api/apps'); },
+        audit(limit)        { return this.get('/api/audit?limit=' + (limit || 200)); },
         ports()             { return this.get('/api/ports'); },
         port(p)             { return this.get('/api/ports/' + p); },
         services()          { return this.get('/api/services'); },

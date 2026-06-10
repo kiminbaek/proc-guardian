@@ -1,5 +1,5 @@
 #!/bin/bash
-# proc-guardian 生命周期管理 v1.0.0
+# proc-guardian 生命周期管理 v1.1.0
 
 LOG_FILE="${TRIM_PKGVAR}/info.log"
 PID_FILE="${TRIM_PKGVAR}/app.pid"
@@ -107,110 +107,37 @@ EOF
 #          写入新格式 + init_mode=true 1h 宽限（用户用旧 token 仍能登录）
 ensure_auth_token() {
     local auth_file="${AUTH_FILE}"
-    local token
-    local token_hash
     local created_at
-    local initialized_at
-    local existing_version
-
     created_at=$(date -Iseconds)
-    # node 毫秒时间戳（fallback 到 shell 秒*1000）
-    initialized_at=$(node -e "process.stdout.write(String(Date.now()))" 2>/dev/null)
-    if [ -z "${initialized_at}" ]; then
-        initialized_at=$(( $(date +%s) * 1000 ))
-    fi
 
+    # v1.1.0：新装不再生成登录 Token，改为 Web 首次注册管理员密码。
+    # 兼容策略：
+    # - 已是 password auth：不动
+    # - 旧 token/token_hash auth：不动，server 会进入 legacy_upgrade 模式
+    # - 无 auth.json：写 uninitialized 标记（Web 显示“创建管理员密码”）
     if [ -f "${auth_file}" ]; then
-        # 检测已有 auth.json 的版本
-        existing_version=$(grep -oP '"version"\s*:\s*"\K[^"]+' "${auth_file}" 2>/dev/null | head -1)
-
-        if [ "${existing_version}" = "1.1" ]; then
-            # 已经是新版（v1.0.7+ 装过），不重复迁移
+        if grep -q '"auth_type"[[:space:]]*:[[:space:]]*"password"' "${auth_file}" 2>/dev/null; then
+            log_msg "Auth mode: password (v2.0), keep existing auth.json"
             return 0
         fi
-
-        # 旧版（v1.0）迁移：保留旧 token
-        local old_token
-        old_token=$(grep -oP '"token"\s*:\s*"\K[^"]+' "${auth_file}" 2>/dev/null | head -1)
-        if [ -n "${old_token}" ]; then
-            token="${old_token}"
-            # 计算 sha256 hash（用 node 确保一致）
-            token_hash=$(printf '%s' "${token}" | node -e "
-                const crypto = require('crypto');
-                const buf = [];
-                process.stdin.on('data', c => buf.push(c));
-                process.stdin.on('end', () => {
-                    const h = crypto.createHash('sha256').update(Buffer.concat(buf).toString('utf8')).digest('hex');
-                    process.stdout.write(h);
-                });
-            " 2>/dev/null)
-            if [ -z "${token_hash}" ]; then
-                log_msg "WARN: failed to hash old token, regenerating new one"
-                token=$(node -e "process.stdout.write(require('crypto').randomBytes(24).toString('base64url'))" 2>/dev/null)
-                token_hash=$(printf '%s' "${token}" | node -e "
-                    const crypto = require('crypto');
-                    const buf = [];
-                    process.stdin.on('data', c => buf.push(c));
-                    process.stdin.on('end', () => {
-                        process.stdout.write(crypto.createHash('sha256').update(Buffer.concat(buf).toString('utf8')).digest('hex'));
-                    });
-                " 2>/dev/null)
-            fi
-
-            log_msg "Migrating auth.json v1.0 -> v1.1 (preserving token)..."
-            cat > "${auth_file}" <<EOF
-{
-  "token_hash": "${token_hash}",
-  "token_plain": "${token}",
-  "init_mode_hours": 1,
-  "initialized_at": ${initialized_at},
-  "created": "${created_at}",
-  "version": "1.1"
-}
-EOF
-            chmod 600 "${auth_file}" 2>/dev/null
-            log_msg "Auth token migrated. Existing token still valid for 1h init mode: ${token}"
+        if grep -q '"token"\|"token_hash"\|"token_plain"' "${auth_file}" 2>/dev/null; then
+            log_msg "Auth mode: legacy token detected, keep for Web password upgrade"
             return 0
         fi
-
-        # 旧版但没 token 字段（异常）→ 删除重新生成
-        log_msg "WARN: existing auth.json has no token, regenerating..."
-        rm -f "${auth_file}"
+        local backup_file="${auth_file}.bak.$(date +%s)"
+        cp -p "${auth_file}" "${backup_file}" 2>/dev/null
+        log_msg "Unknown auth.json format, backed up to: ${backup_file}; reset to setup_required"
     fi
-
-    # 新装 / 重装：生成新 token + 新格式
-    log_msg "Generating auth token (first run)..."
-    token=$(node -e "process.stdout.write(require('crypto').randomBytes(24).toString('base64url'))" 2>/dev/null)
-    if [ -z "${token}" ]; then
-        log_msg "ERROR: failed to generate auth token"
-        return 1
-    fi
-
-    token_hash=$(printf '%s' "${token}" | node -e "
-        const crypto = require('crypto');
-        const buf = [];
-        process.stdin.on('data', c => buf.push(c));
-        process.stdin.on('end', () => {
-            process.stdout.write(crypto.createHash('sha256').update(Buffer.concat(buf).toString('utf8')).digest('hex'));
-        });
-    " 2>/dev/null)
 
     cat > "${auth_file}" <<EOF
 {
-  "token_hash": "${token_hash}",
-  "token_plain": "${token}",
-  "init_mode_hours": 1,
-  "initialized_at": ${initialized_at},
-  "created": "${created_at}",
-  "version": "1.1"
+  "version": "2.0",
+  "auth_type": "uninitialized",
+  "created": "${created_at}"
 }
 EOF
     chmod 600 "${auth_file}" 2>/dev/null
-    log_msg "============================================================"
-    log_msg "  AUTH TOKEN GENERATED (v1.0.7+):"
-    log_msg "  ${token}"
-    log_msg "  Please enter this token on the login page."
-    log_msg "============================================================"
+    log_msg "Auth mode: setup_required. Open Web UI to create administrator password."
     return 0
 }
 

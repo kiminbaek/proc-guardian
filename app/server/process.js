@@ -35,11 +35,13 @@ function getAllProcesses() {
     const procs = [];
     for (const line of lines) {
         if (!line.trim()) continue;
-        // 简单 split by whitespace（ps 输出的 ARGS 可能含空格，所以前 11 列固定）
+        // 简单 split by whitespace（ps 输出的 ARGS 可能含空格，所以前 10 列固定）
+        // v1.0.8 修：部分内核线程/僵尸进程 args 为空导致 parts.length < 11，改为 10
         const parts = line.trim().split(/\s+/);
-        if (parts.length < 11) continue;
-        const [pid, ppid, user, pri, ni, vsz, rss, pcpu, pmem, etime, comm] = parts;
-        const args = parts.slice(11).join(' ');
+        if (parts.length < 10) continue;
+        const [pid, ppid, user, pri, ni, vsz, rss, pcpu, pmem, etime] = parts;
+        const comm = parts.length > 10 ? parts[10] : '';
+        const args = parts.length > 11 ? parts.slice(11).join(' ') : (comm || '');
 
         const pidN = parseInt(pid, 10);
         if (!Number.isFinite(pidN)) continue;
@@ -54,7 +56,7 @@ function getAllProcesses() {
             if (!cwd) {
                 try { cwd = fs.readlinkSync(`/proc/${pidN}/cwd`); } catch (e) {}
             }
-            try { exe = fs.readlinkSync(`/proc/${pidN}/exe`); } catch (e) {}
+            try { exe = fs.readlinkSync(`/proc/${pidN}/exe`); } catch (e) { exe = safeReadFile(`/proc/${pidN}/exe`); }
         } catch (e) {}
 
         procs.push({

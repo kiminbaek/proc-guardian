@@ -1,80 +1,66 @@
-// /api/auth 路由
-// BUG #1/#2/#3/#20 修复版 v1.0.6
-
+// /api/auth 路由 v1.1.0
 const express = require('express');
 const router = express.Router();
 const auth = require('../auth');
+const audit = require('../audit');
 
-// 通过 getter 获取最新 module 变量（避免 ES6 简写求值时机错）
-const _i = () => auth._internal;
+function ip(req) { return req.ip || req.connection.remoteAddress || 'unknown'; }
+
+router.get('/mode', (req, res) => res.json({ ok: true, ...auth.getStatus() }));
+
+router.post('/setup', (req, res) => {
+    const remote = ip(req);
+    try {
+        auth.setupPassword((req.body || {}).password || '');
+        audit.append('auth_setup', { ...audit.fromReq(req), result: 'success' });
+        const session_token = auth.createSession(remote);
+        res.json({ ok: true, session_token, mode: auth.getMode() });
+    } catch (e) {
+        audit.append('auth_setup', { ...audit.fromReq(req), result: 'failed', error: e.message });
+        res.status(400).json({ ok: false, error: e.message });
+    }
+});
+
+router.post('/upgrade', (req, res) => {
+    const remote = ip(req);
+    if (auth.isLocked(remote)) return res.status(429).json({ ok: false, error: 'too_many_attempts', retry_after: auth.getLockSeconds(remote) });
+    try {
+        auth.upgradeLegacyToken((req.body || {}).token || '', (req.body || {}).password || '');
+        auth.clearFailures(remote);
+        audit.append('auth_upgrade', { ...audit.fromReq(req), result: 'success' });
+        const session_token = auth.createSession(remote);
+        res.json({ ok: true, session_token, mode: auth.getMode() });
+    } catch (e) {
+        auth.recordFailure(remote);
+        audit.append('auth_upgrade', { ...audit.fromReq(req), result: 'failed', error: e.message });
+        res.status(401).json({ ok: false, error: e.message });
+    }
+});
 
 router.post('/login', (req, res) => {
-    const ip = req.ip || req.connection.remoteAddress || 'unknown';
-
-    // 锁定检查
-    if (auth.isLocked(ip)) {
-        return res.status(429).json({
-            ok: false,
-            error: 'too_many_attempts',
-            retry_after: auth.getLockSeconds(ip)
-        });
+    const remote = ip(req);
+    if (auth.isLocked(remote)) return res.status(429).json({ ok: false, error: 'too_many_attempts', retry_after: auth.getLockSeconds(remote) });
+    const password = (req.body || {}).password || (req.body || {}).token || '';
+    if (!password) return res.status(400).json({ ok: false, error: 'no_password' });
+    if (auth.verifyPassword(password)) {
+        auth.clearFailures(remote);
+        const session_token = auth.createSession(remote);
+        audit.append('auth_login', { ...audit.fromReq(req), result: 'success' });
+        return res.json({ ok: true, session_token, mode: auth.getMode() });
     }
-
-    const { token: provided } = req.body || {};
-    if (!provided) {
-        auth.recordFailure(ip);
-        return res.status(400).json({ ok: false, error: 'no_token' });
-    }
-
-    const internal = _i();
-
-    // === BUG #1 修复：协议统一 ===
-    // init mode 1h 内 + 明文 token 匹配 → 一次性登录
-    if (internal.initMode && internal.tokenPlain && provided === internal.tokenPlain) {
-        auth.clearFailures(ip);
-        return res.json({
-            ok: true,
-            session_token: internal.tokenHash,  // 返 hash 作为 session_token
-            init_mode: true,
-            hint: 'store session_token, never store plain token'
-        });
-    }
-
-    // session_token (hash) 验证：直接比较（BUG #1 修复）
-    if (internal.tokenHash && provided === internal.tokenHash) {
-        auth.clearFailures(ip);
-        return res.json({
-            ok: true,
-            session_token: internal.tokenHash
-        });
-    }
-
-    // 失败
-    auth.recordFailure(ip);
-    const locked = auth.isLocked(ip);
-    return res.status(401).json({
-        ok: false,
-        error: locked ? 'too_many_attempts' : 'bad_token',
-        retry_after: locked ? auth.getLockSeconds(ip) : 0
-    });
+    auth.recordFailure(remote);
+    audit.append('auth_login', { ...audit.fromReq(req), result: 'failed' });
+    const locked = auth.isLocked(remote);
+    res.status(401).json({ ok: false, error: locked ? 'too_many_attempts' : 'bad_password', retry_after: locked ? auth.getLockSeconds(remote) : 0 });
 });
 
-// 登出（BUG #20：新增端点，简单版不持久化黑名单）
 router.post('/logout', (req, res) => {
-    // 当前实现：让前端清 localStorage / sessionStorage
-    // 完整版需要 token 黑名单 + 持久化（v1.0.7+）
-    res.json({ ok: true, hint: 'frontend should clear stored token' });
+    const token = req.headers['x-auth-token'] || (req.body || {}).token;
+    auth.revokeSession(token);
+    audit.append('auth_logout', { ...audit.fromReq(req), result: 'success' });
+    res.json({ ok: true });
 });
 
-router.get('/status', (req, res) => {
-    const internal = _i();
-    res.json({
-        ok: true,
-        authenticated: true,  // 已通过 authMiddleware
-        init_mode: internal.initMode,
-        server_started_at: internal.serverStartedAt,
-        uptime_seconds: Math.floor((Date.now() - internal.serverStartedAt) / 1000)
-    });
-});
+router.get('/status', (req, res) => res.json({ ok: true, authenticated: true, ...auth.getStatus() }));
 
 module.exports = router;

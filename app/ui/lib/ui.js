@@ -34,6 +34,31 @@
             });
         },
 
+        // 输入确认弹窗（用于高危操作）
+        promptConfirm(title, body, phrase) {
+            return new Promise((resolve) => {
+                const modal = document.getElementById('modal-confirm');
+                document.getElementById('modal-title').textContent = title;
+                document.getElementById('modal-body').innerHTML = body + `<div class="confirm-phrase">请输入 <code>${this.escapeHtml(phrase)}</code><input id="modal-phrase-input" autocomplete="off" placeholder="输入确认短语"></div>`;
+                modal.classList.remove('hidden');
+                const ok = document.getElementById('modal-ok');
+                const cancel = document.getElementById('modal-cancel');
+                const input = document.getElementById('modal-phrase-input');
+                ok.disabled = true;
+                input.oninput = () => { ok.disabled = input.value === phrase ? false : true; };
+                const close = (v) => {
+                    modal.classList.add('hidden');
+                    ok.disabled = false;
+                    ok.onclick = null;
+                    cancel.onclick = null;
+                    resolve(v);
+                };
+                ok.onclick = () => close(true);
+                cancel.onclick = () => close(false);
+                input.focus();
+            });
+        },
+
         // 格式化
         fmtBytes(n) {
             if (!n || n < 1) return '0';
