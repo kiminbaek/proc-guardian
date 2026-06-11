@@ -44,6 +44,7 @@ app.use('/api/system',    require('./routers/system'));
 app.use('/api/whitelist', require('./routers/whitelist'));
 app.use('/api/apps',      require('./routers/apps'));
 app.use('/api/audit',     require('./routers/auditlog'));
+app.use('/api/settings',  require('./routers/settings'));
 
 // 静态文件
 app.use(express.static(path.join(__dirname, '..', 'ui')));

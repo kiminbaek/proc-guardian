@@ -26,37 +26,54 @@
     </div>
 
     <!-- 主界面 -->
-    <div id="main-page" class="page hidden">
-        <header class="topbar">
-            <div class="brand">
+    <div id="main-page" class="page hidden app-window">
+        <aside class="sidebar">
+            <div class="sidebar-brand">
                 <span class="logo-sm">🛡️</span>
-                <span>进程管理</span>
+                <div>
+                    <strong>进程管理</strong>
+                    <small>桌面控制台</small>
+                </div>
             </div>
-            <div class="topbar-stats" id="topbar-stats">
-                <span class="stat" title="CPU 核心">CPU <b id="stat-cpu">-</b>%</span>
-                <span class="stat" title="内存使用">MEM <b id="stat-mem">-</b>%</span>
-                <span class="stat" title="监听端口">PORT <b id="stat-ports">-</b></span>
-                <span class="stat" title="服务数量">SVC <b id="stat-svcs">-</b></span>
-                <span class="stat" title="进程总数">PROC <b id="stat-procs">-</b></span>
+            <nav class="tabs side-tabs">
+                <button class="tab active" data-tab="dashboard"><span>⌂</span><b>总览</b></button>
+                <button class="tab" data-tab="apps"><span>▦</span><b>应用</b></button>
+                <button class="tab" data-tab="processes"><span>▤</span><b>进程</b></button>
+                <button class="tab" data-tab="ports"><span>◌</span><b>端口</b></button>
+                <button class="tab" data-tab="services"><span>⚙</span><b>系统服务</b></button>
+                <button class="tab" data-tab="audit"><span>◎</span><b>审计日志</b></button>
+                <button class="tab" data-tab="system"><span>◈</span><b>系统信息</b></button>
+                <button class="tab" data-tab="whitelist"><span>◇</span><b>安全策略</b></button>
+                <button class="tab" data-tab="settings"><span>☰</span><b>设置中心</b></button>
+            </nav>
+            <div class="sidebar-foot">
+                <span class="status-dot"></span>
+                <span>本机控制台 · iframe</span>
             </div>
-            <div class="topbar-actions">
-                <button id="refresh-btn" class="top-action" title="立即刷新">🔄 刷新</button>
-                <button id="close-btn" class="top-action" title="关闭界面">✕ 关闭</button>
-                <button id="logout-btn" class="top-action danger-lite" title="注销">🚪 注销</button>
-            </div>
-        </header>
+        </aside>
 
-        <nav class="tabs">
-            <button class="tab active" data-tab="dashboard">总览</button>
-            <button class="tab" data-tab="apps">应用</button>
-            <button class="tab" data-tab="processes">进程</button>
-            <button class="tab" data-tab="ports">端口</button>
-            <button class="tab" data-tab="services">系统服务</button>
-            <button class="tab" data-tab="audit">审计</button>
-            <button class="tab" data-tab="system">系统</button>
-            <button class="tab" data-tab="whitelist">白名单</button>
-        </nav>
+        <main class="workspace">
+            <header class="topbar">
+                <div class="workspace-title">
+                    <strong id="workspace-title">总览</strong>
+                    <small id="workspace-subtitle">系统运行态、应用、端口和安全操作总览</small>
+                </div>
+                <div class="topbar-stats" id="topbar-stats">
+                    <span class="stat" title="CPU 核心">CPU <b id="stat-cpu">-</b>%</span>
+                    <span class="stat" title="内存使用">MEM <b id="stat-mem">-</b>%</span>
+                    <span class="stat" title="监听端口">PORT <b id="stat-ports">-</b></span>
+                    <span class="stat" title="服务数量">SVC <b id="stat-svcs">-</b></span>
+                    <span class="stat" title="进程总数">PROC <b id="stat-procs">-</b></span>
+                </div>
+                <div class="topbar-actions">
+                    <button id="auto-refresh-toggle" class="refresh-indicator" title="点击切换当前页面自动刷新"><span class="refresh-dot"></span><b id="auto-refresh-label">自动</b></button>
+                    <button id="refresh-btn" class="top-action" title="立即刷新">🔄 刷新</button>
+                    <button id="close-btn" class="top-action" title="关闭界面">✕ 关闭</button>
+                    <button id="logout-btn" class="top-action danger-lite" title="注销">🚪 注销</button>
+                </div>
+            </header>
 
+            <div class="content-surface">
         <!-- 总览 Tab -->
         <section id="tab-dashboard" class="tab-content">
             <div id="dashboard-cards" class="dashboard-cards"></div>
@@ -98,22 +115,39 @@
                     <option value="root_user">root 高权限</option>
                     <option value="with_port">有端口</option>
                 </select>
-                <label class="checkbox">
-                    <input type="checkbox" id="proc-auto-refresh" checked> 自动刷新 (3s)
-                </label>
+                <div class="quick-filters" aria-label="快捷筛选">
+                    <button class="chip" data-proc-filter="high">高风险</button>
+                    <button class="chip" data-proc-filter="with_port">有端口</button>
+                    <button class="chip" data-proc-filter="fnos_app">飞牛应用</button>
+                    <button class="chip" data-proc-filter="root_user">root</button>
+                    <button class="chip ghost" id="proc-clear-filters">清空</button>
+                </div>
+                <div class="view-density" aria-label="命令列宽度">
+                    <button class="chip active" data-cmd-width="normal">标准</button>
+                    <button class="chip" data-cmd-width="wide">宽命令</button>
+                    <button class="chip" data-cmd-width="compact">紧凑</button>
+                </div>
             </div>
             <div class="table-wrap">
                 <table class="proc-table">
+                    <colgroup>
+                        <col class="cg-pid">
+                        <col class="cg-user">
+                        <col class="cg-app">
+                        <col class="cg-cpu">
+                        <col class="cg-mem">
+                        <col class="cg-cmd">
+                        <col class="cg-ports">
+                        <col class="cg-risk">
+                        <col class="cg-action">
+                    </colgroup>
                     <thead>
                         <tr>
                             <th class="col-pid">PID</th>
-                            <th class="col-pid">PPID</th>
                             <th class="col-user">用户</th>
-                            <th class="col-app">应用</th>
-                            <th class="col-cpu">CPU%</th>
-                            <th class="col-mem">MEM%</th>
-                            <th class="col-mem">RSS</th>
-                            <th class="col-time">启动</th>
+                            <th class="col-app">应用/进程</th>
+                            <th class="col-cpu">CPU</th>
+                            <th class="col-mem">MEM</th>
                             <th class="col-cmd">命令</th>
                             <th class="col-ports">端口</th>
                             <th>风险</th>
@@ -129,9 +163,6 @@
         <section id="tab-ports" class="tab-content hidden">
             <div class="toolbar">
                 <input type="text" id="port-search" placeholder="搜索端口 / 进程 / 应用...">
-                <label class="checkbox">
-                    <input type="checkbox" id="port-auto-refresh" checked> 自动刷新 (3s)
-                </label>
             </div>
             <div class="table-wrap">
                 <table class="port-table">
@@ -162,9 +193,6 @@
                     <option value="inactive">已停止</option>
                     <option value="failed">失败</option>
                 </select>
-                <label class="checkbox">
-                    <input type="checkbox" id="svc-auto-refresh" checked> 自动刷新 (5s)
-                </label>
             </div>
             <div class="table-wrap">
                 <table class="svc-table">
@@ -202,36 +230,164 @@
         <!-- 白名单 Tab -->
         <section id="tab-whitelist" class="tab-content hidden">
             <p class="hint">受保护的进程 / 用户 / 端口：白名单内默认禁止杀，需 <code>confirm: "FORCE"</code> 才强杀。</p>
-            <div class="whitelist-form">
-                <label>
-                    <span>受保护的 PID（每行一个）</span>
-                    <textarea id="wl-pids" rows="4" placeholder="1&#10;2"></textarea>
-                </label>
-                <label>
-                    <span>受保护的用户（每行一个）</span>
-                    <textarea id="wl-users" rows="4" placeholder="root&#10;proc_guardian"></textarea>
-                </label>
-                <label>
-                    <span>受保护的进程名（每行一个）</span>
-                    <textarea id="wl-process_names" rows="8" placeholder="systemd&#10;sshd&#10;nginx"></textarea>
-                </label>
-                <label>
-                    <span>受保护的 cmdline 关键字（每行一个）</span>
-                    <textarea id="wl-cmdline_keywords" rows="6" placeholder="/lib/systemd/&#10;/var/apps/trim."></textarea>
-                </label>
-                <label>
-                    <span>受保护的端口（每行一个）</span>
-                    <textarea id="wl-ports" rows="4" placeholder="22&#10;80"></textarea>
-                </label>
+            <details class="whitelist-form advanced-editor">
+                <summary>高级编辑（批量粘贴 / 每行一个）</summary>
+                <div class="advanced-grid">
+                    <label>
+                        <span>受保护的 PID</span>
+                        <textarea id="wl-pids" rows="3" placeholder="1&#10;2"></textarea>
+                    </label>
+                    <label>
+                        <span>受保护的用户</span>
+                        <textarea id="wl-users" rows="3" placeholder="root&#10;proc_guardian"></textarea>
+                    </label>
+                    <label>
+                        <span>受保护的进程名</span>
+                        <textarea id="wl-process_names" rows="4" placeholder="systemd&#10;sshd&#10;nginx"></textarea>
+                    </label>
+                    <label>
+                        <span>受保护的 cmdline 关键字</span>
+                        <textarea id="wl-cmdline_keywords" rows="4" placeholder="/lib/systemd/&#10;/var/apps/trim."></textarea>
+                    </label>
+                    <label>
+                        <span>受保护的端口</span>
+                        <textarea id="wl-ports" rows="3" placeholder="22&#10;80"></textarea>
+                    </label>
+                </div>
                 <div class="form-actions">
                     <button id="wl-save" class="primary">保存白名单</button>
                     <button id="wl-reload">重新加载</button>
+                    <button id="wl-defaults">恢复默认</button>
                     <span id="wl-status"></span>
                 </div>
+            </details>
+            <div class="whitelist-visual">
+                <div class="wl-add-card">
+                    <h3>快速添加保护规则</h3>
+                    <div class="wl-add-row">
+                        <select id="wl-add-type">
+                            <option value="process_names">进程名</option>
+                            <option value="cmdline_keywords">命令关键词</option>
+                            <option value="users">用户</option>
+                            <option value="pids">PID</option>
+                            <option value="ports">端口</option>
+                        </select>
+                        <input type="text" id="wl-add-value" placeholder="例如 sshd / /var/apps/ / 8877">
+                        <button id="wl-add" class="primary">添加</button>
+                    </div>
+                </div>
+                <div class="wl-rule-table-wrap"><table class="wl-rule-table"><thead><tr><th>类型</th><th>值</th><th>操作</th></tr></thead><tbody id="wl-rule-tbody"></tbody></table></div>
+                <div class="wl-chip-groups hidden" id="wl-chip-groups"></div>
             </div>
         </section>
-    </div>
 
+            <!-- 设置中心 Tab -->
+            <section id="tab-settings" class="tab-content hidden">
+                <div class="settings-hero">
+                    <div>
+                        <h2>设置中心</h2>
+                        <p>把常用偏好、安全策略和数据操作集中到应用内完成，减少网页后台感。</p>
+                    </div>
+                    <span class="version-pill">proc-guardian v1.4.2</span>
+                </div>
+                <div class="settings-grid">
+                    <div class="settings-card">
+                        <h3>界面偏好</h3>
+                        <label class="setting-row">
+                            <span><b>主题模式</b><em>跟随系统 / 浅色 / 深色</em></span>
+                            <select id="setting-theme">
+                                <option value="system">跟随系统</option>
+                                <option value="light">浅色</option>
+                                <option value="dark">深色</option>
+                            </select>
+                        </label>
+                        <label class="setting-row">
+                            <span><b>默认首页</b><em>下次打开控制台时默认进入</em></span>
+                            <select id="setting-home-tab">
+                                <option value="dashboard">总览</option>
+                                <option value="apps">应用</option>
+                                <option value="processes">进程</option>
+                                <option value="ports">端口</option>
+                                <option value="services">系统服务</option>
+                                <option value="audit">审计日志</option>
+                                <option value="system">系统信息</option>
+                                <option value="whitelist">安全策略</option>
+                                <option value="settings">设置中心</option>
+                            </select>
+                        </label>
+                        <label class="setting-row">
+                            <span><b>紧凑模式</b><em>减少表格和卡片间距，适合小窗口</em></span>
+                            <input type="checkbox" id="setting-compact">
+                        </label>
+                        <label class="setting-row">
+                            <span><b>进程命令列宽</b><em>影响进程页表格显示，不会挤压端口/风险列</em></span>
+                            <select id="setting-cmd-width">
+                                <option value="normal">标准</option>
+                                <option value="wide">宽命令</option>
+                                <option value="compact">紧凑</option>
+                            </select>
+                        </label>
+                        <label class="setting-row">
+                            <span><b>软件化外观</b><em>左侧导航、窗口化面板、减少网页感</em></span>
+                            <input type="checkbox" id="setting-app-look" checked disabled>
+                        </label>
+                    </div>
+
+                    <div class="settings-card">
+                        <h3>刷新行为</h3>
+                        <label class="setting-row">
+                            <span><b>进程自动刷新</b><em>进程页每 3 秒刷新</em></span>
+                            <input type="checkbox" id="setting-auto-proc">
+                        </label>
+                        <label class="setting-row">
+                            <span><b>端口自动刷新</b><em>端口页每 3 秒刷新</em></span>
+                            <input type="checkbox" id="setting-auto-port">
+                        </label>
+                        <label class="setting-row">
+                            <span><b>服务自动刷新</b><em>服务页每 5 秒刷新</em></span>
+                            <input type="checkbox" id="setting-auto-svc">
+                        </label>
+                        <div class="settings-actions">
+                            <button id="settings-save" class="primary">保存偏好</button>
+                            <button id="settings-reset">恢复默认</button>
+                        </div>
+                        <p id="settings-status" class="muted"></p>
+                    </div>
+
+                    <div class="settings-card">
+                        <h3>安全策略</h3>
+                        <div class="setting-info-list">
+                            <div><b>PID 1 / systemd</b><span>禁止结束</span></div>
+                            <div><b>飞牛核心服务</b><span>高危确认</span></div>
+                            <div><b>root 高权限进程</b><span>警告确认</span></div>
+                            <div><b>白名单规则</b><span>应用内维护</span></div>
+                        </div>
+                        <div class="settings-actions">
+                            <button class="jump-btn" data-jump-tab="whitelist">打开安全策略</button>
+                            <button class="jump-btn" data-jump-tab="audit">查看审计日志</button>
+                        </div>
+                    </div>
+
+                    <div class="settings-card">
+                        <h3>数据与维护</h3>
+                        <div class="setting-info-list">
+                            <div><b>审计记录</b><span>敏感操作自动记录</span></div>
+                            <div><b>登录凭据</b><span>sessionStorage，关窗口失效</span></div>
+                            <div><b>偏好设置</b><span>保存在 appdata/settings.json，localStorage 仅兜底</span></div>
+                            <div><b>应用数据</b><span>/vol3/@appdata/proc-guardian/</span></div>
+                        </div>
+                        <div class="settings-actions">
+                            <button id="settings-refresh-all">立即刷新全部</button>
+                            <button id="settings-export-prefs">导出设置</button>
+                            <button id="settings-import-prefs">导入设置</button>
+                            <input type="file" id="settings-import-file" accept="application/json" class="hidden">
+                        </div>
+                    </div>
+                </div>
+            </section>
+            </div>
+        </main>
+    </div>
 
     <!-- 进程详情抽屉 -->
     <div id="proc-drawer" class="drawer hidden">

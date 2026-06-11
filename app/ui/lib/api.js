@@ -76,7 +76,12 @@
         system()            { return this.get('/api/system'); },
         whitelist()         { return this.get('/api/whitelist'); },
         whitelistUpdate(o)  { return this.put('/api/whitelist', o); },
-        whitelistCheck(o)   { return this.post('/api/whitelist/check', o); }
+        whitelistCheck(o)   { return this.post('/api/whitelist/check', o); },
+        settings()          { return this.get('/api/settings'); },
+        settingsUpdate(o)   { return this.put('/api/settings', o); },
+        settingsExport()    { return this.get('/api/settings/export'); },
+        settingsImport(o)   { return this.post('/api/settings/import', o); },
+        settingsReset()     { return this.post('/api/settings/reset', {}); }
     };
 
     window.Api = Api;

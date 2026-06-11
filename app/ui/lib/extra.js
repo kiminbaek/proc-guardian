@@ -13,7 +13,7 @@
       if ($('stat-mem')) $('stat-mem').textContent = sys.memory ? sys.memory.percent : '-';
       if ($('stat-ports')) $('stat-ports').textContent = ports.total; if ($('stat-procs')) $('stat-procs').textContent = procs.total;
       const list = procs.processes || []; const high = list.filter(p=>p.risk_level>=2).length; const appCount = (apps.apps||[]).filter(a=>a.has_running_process).length;
-      $('dashboard-cards').innerHTML = [card('CPU',(sys.cpu&&sys.cpu.usage||'-')+'%','系统负载'),card('MEM',(sys.memory&&sys.memory.percent||'-')+'%','内存使用'),card('进程',procs.total,'当前进程'),card('端口',ports.total,'监听端口'),card('高风险',high,'系统/核心/root'),card('运行应用',appCount,'发现进程的应用')].join('');
+      $('dashboard-cards').innerHTML = [card('进程',procs.total,'当前进程'),card('端口',ports.total,'监听端口'),card('高风险',high,'需谨慎操作'),card('运行应用',appCount,'发现进程的应用')].join('');
       $('dash-top-cpu').innerHTML = miniProc(list.slice(0,8));
       $('dash-top-mem').innerHTML = miniProc([...list].sort((a,b)=>b.pmem-a.pmem).slice(0,8));
       $('dash-app-ports').innerHTML = miniApps((apps.apps||[]).filter(a=>a.ports.length).slice(0,8));

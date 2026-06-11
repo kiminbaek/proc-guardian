@@ -66,10 +66,10 @@ router.put('/', (req, res) => {
     if (!v.ok) return res.status(400).json({ ok: false, ...v });
 
     try {
-        // 合并：保留未提供的字段
+        // 合并：保留未提供的字段；v1.4.0 起 config.json 统一写入 { whitelist: {...} }
         const current = whitelist.load(WHITELIST_FILE);
         const merged = { ...current, ...req.body };
-        atomicWriteJson(WHITELIST_FILE, merged);
+        atomicWriteJson(WHITELIST_FILE, { whitelist: merged });
         // 清缓存
         whitelist.clearCache();
         res.json({ ok: true, whitelist: merged });

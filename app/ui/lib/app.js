@@ -1,4 +1,4 @@
-// proc-guardian 前端主逻辑 v1.0.0
+// proc-guardian 前端主逻辑 v1.4.2
 (function() {
     'use strict';
 
@@ -17,8 +17,141 @@
         svcState: '',
         appSearch: '',
         autoRefresh: { processes: true, ports: true, services: true },
-        timers: {}
+        timers: {},
+        settings: { theme: 'system', compact: false, homeTab: 'dashboard', cmdWidth: 'normal' }
     };
+
+
+
+    const PREF_KEY = 'proc_guardian_prefs_v142';
+    const tabMeta = {
+        dashboard: ['总览', '系统运行态、应用、端口和安全操作总览'],
+        apps: ['应用', '飞牛应用、进程、端口和资源占用聚合'],
+        processes: ['进程', '查看进程、风险等级和安全结束操作'],
+        ports: ['端口', '监听端口、占用进程和应用归属'],
+        services: ['系统服务', 'systemd 服务状态、控制和日志'],
+        audit: ['审计日志', '最近敏感操作和安全事件'],
+        system: ['系统信息', 'CPU、内存、系统版本和运行状态'],
+        whitelist: ['安全策略', '白名单、保护对象和高危操作策略'],
+        settings: ['设置中心', '界面偏好、刷新行为、安全入口和数据维护']
+    };
+
+    function loadPrefs() {
+        try {
+            const raw = localStorage.getItem(PREF_KEY);
+            if (!raw) return;
+            const p = JSON.parse(raw);
+            state.settings = Object.assign(state.settings, p || {});
+            if (p && p.autoRefresh) state.autoRefresh = Object.assign(state.autoRefresh, p.autoRefresh);
+            if (p && p.homeTab) state.currentTab = p.homeTab;
+        } catch (e) { console.warn('loadPrefs failed:', e); }
+    }
+
+    function savePrefs() {
+        const p = {
+            theme: state.settings.theme || 'system',
+            compact: !!state.settings.compact,
+            homeTab: state.settings.homeTab || state.currentTab || 'dashboard',
+            cmdWidth: state.settings.cmdWidth || 'normal',
+            autoRefresh: Object.assign({}, state.autoRefresh)
+        };
+        localStorage.setItem(PREF_KEY, JSON.stringify(p));
+        return p;
+    }
+
+    async function loadServerSettings() {
+        try {
+            const r = await Api.settings();
+            const p = r.settings || {};
+            state.settings = Object.assign(state.settings, p || {});
+            if (p.autoRefresh) state.autoRefresh = Object.assign(state.autoRefresh, p.autoRefresh);
+            if (p.homeTab) state.currentTab = p.homeTab;
+            return true;
+        } catch (e) {
+            console.warn('loadServerSettings failed, fallback localStorage:', e.message);
+            return false;
+        }
+    }
+
+    async function saveServerSettings() {
+        const p = savePrefs();
+        try {
+            const r = await Api.settingsUpdate(p);
+            if (r.settings) {
+                state.settings = Object.assign(state.settings, r.settings);
+                if (r.settings.autoRefresh) state.autoRefresh = Object.assign(state.autoRefresh, r.settings.autoRefresh);
+            }
+            return r;
+        } catch (e) {
+            UI.toast('服务端设置保存失败，已保存在当前浏览器: ' + e.message, 'error', 4000);
+            throw e;
+        }
+    }
+
+    function downloadJson(filename, obj) {
+        const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    function getAutoKey(tab) {
+        if (tab === 'processes') return 'processes';
+        if (tab === 'ports') return 'ports';
+        if (tab === 'services') return 'services';
+        return '';
+    }
+
+    function updateAutoIndicator() {
+        const btn = $('auto-refresh-toggle');
+        const label = $('auto-refresh-label');
+        if (!btn || !label) return;
+        const key = getAutoKey(state.currentTab);
+        if (!key) {
+            btn.classList.add('hidden');
+            return;
+        }
+        btn.classList.remove('hidden');
+        const on = !!state.autoRefresh[key];
+        btn.classList.toggle('off', !on);
+        label.textContent = on ? '自动' : '手动';
+        btn.title = `${on ? '已开启' : '已关闭'}当前页自动刷新，点击切换`;
+    }
+
+    function toggleCurrentAutoRefresh() {
+        const key = getAutoKey(state.currentTab);
+        if (!key) return;
+        state.autoRefresh[key] = !state.autoRefresh[key];
+        applyPrefs();
+        syncSettingsForm();
+        savePrefs();
+        UI.toast(`${tabMeta[state.currentTab][0]}自动刷新：${state.autoRefresh[key] ? '开' : '关'}`, 'success', 1200);
+    }
+
+    function applyPrefs() {
+        document.body.dataset.theme = state.settings.theme || 'system';
+        document.body.classList.toggle('compact-mode', !!state.settings.compact);
+        document.body.dataset.cmdWidth = state.settings.cmdWidth || 'normal';
+        document.querySelectorAll('[data-cmd-width]').forEach(x => x.classList.toggle('active', x.dataset.cmdWidth === (state.settings.cmdWidth || 'normal')));
+        updateAutoIndicator();
+    }
+
+    function syncSettingsForm() {
+        const theme = $('setting-theme'); if (theme) theme.value = state.settings.theme || 'system';
+        const home = $('setting-home-tab'); if (home) home.value = state.settings.homeTab || state.currentTab || 'dashboard';
+        const compact = $('setting-compact'); if (compact) compact.checked = !!state.settings.compact;
+        const cmdWidth = $('setting-cmd-width'); if (cmdWidth) cmdWidth.value = state.settings.cmdWidth || 'normal';
+        const ap = $('setting-auto-proc'); if (ap) ap.checked = !!state.autoRefresh.processes;
+        const aport = $('setting-auto-port'); if (aport) aport.checked = !!state.autoRefresh.ports;
+        const asvc = $('setting-auto-svc'); if (asvc) asvc.checked = !!state.autoRefresh.services;
+    }
+
+    function updateWorkspaceTitle(name) {
+        const meta = tabMeta[name] || tabMeta.dashboard;
+        const title = $('workspace-title'); if (title) title.textContent = meta[0];
+        const sub = $('workspace-subtitle'); if (sub) sub.textContent = meta[1];
+    }
 
     // ==================== 登录 / 注册 / 旧 Token 升级 ====================
     async function detectAuthMode() {
@@ -106,7 +239,7 @@
     // ==================== 主流程 ====================
     function boot() {
         bindUI();
-        switchTab('processes');
+        switchTab(state.currentTab || 'dashboard');
         refreshAll();
         state.timers.proc = setInterval(() => {
             if (state.currentTab === 'processes' && state.autoRefresh.processes) refreshProcesses();
@@ -125,6 +258,9 @@
     function bindUI() {
         document.querySelectorAll('.tab').forEach(t => {
             t.onclick = () => switchTab(t.dataset.tab);
+        });
+        document.querySelectorAll('[data-jump-tab]').forEach(t => {
+            t.onclick = () => switchTab(t.dataset.jumpTab);
         });
 
         $('logout-btn').onclick = async () => {
@@ -161,17 +297,39 @@
         $('proc-sort').addEventListener('change', (e) => { state.procSort = e.target.value; refreshProcesses(); });
         $('proc-user-filter').addEventListener('change', (e) => { state.procUserFilter = e.target.value; refreshProcesses(); });
         $('proc-category-filter').addEventListener('change', (e) => { state.procCategoryFilter = e.target.value; refreshProcesses(); });
-        $('proc-auto-refresh').addEventListener('change', (e) => { state.autoRefresh.processes = e.target.checked; });
+        const autoToggle = $('auto-refresh-toggle'); if (autoToggle) autoToggle.onclick = toggleCurrentAutoRefresh;
+        document.querySelectorAll('[data-proc-filter]').forEach(btn => {
+            btn.onclick = () => {
+                state.procCategoryFilter = btn.dataset.procFilter || '';
+                const sel = $('proc-category-filter'); if (sel) sel.value = state.procCategoryFilter;
+                document.querySelectorAll('[data-proc-filter]').forEach(x => x.classList.toggle('active', x === btn));
+                refreshProcesses();
+            };
+        });
+        const clearFilters = $('proc-clear-filters');
+        if (clearFilters) clearFilters.onclick = () => {
+            state.procSearch = ''; state.procUserFilter = ''; state.procCategoryFilter = '';
+            $('proc-search').value = ''; $('proc-user-filter').value = ''; $('proc-category-filter').value = '';
+            document.querySelectorAll('[data-proc-filter]').forEach(x => x.classList.remove('active'));
+            refreshProcesses();
+        };
+        document.querySelectorAll('[data-cmd-width]').forEach(btn => {
+            btn.onclick = () => {
+                state.settings.cmdWidth = btn.dataset.cmdWidth || 'normal';
+                applyPrefs(); savePrefs();
+                document.querySelectorAll('[data-cmd-width]').forEach(x => x.classList.toggle('active', x === btn));
+            };
+        });
         if (window.PGExtra) window.PGExtra.bindExtra(state);
 
         // 端口
         $('port-search').addEventListener('input', (e) => { state.portSearch = e.target.value; refreshPorts(); });
-        $('port-auto-refresh').addEventListener('change', (e) => { state.autoRefresh.ports = e.target.checked; });
+        
 
         // 服务
         $('svc-search').addEventListener('input', (e) => { state.svcSearch = e.target.value; refreshServices(); });
         $('svc-state').addEventListener('change', (e) => { state.svcState = e.target.value; refreshServices(); });
-        $('svc-auto-refresh').addEventListener('change', (e) => { state.autoRefresh.services = e.target.checked; });
+        
 
         // 日志面板关闭
         $('svc-logs-close').onclick = () => $('svc-logs').classList.add('hidden');
@@ -179,10 +337,32 @@
         // 白名单
         $('wl-save').onclick = saveWhitelist;
         $('wl-reload').onclick = loadWhitelist;
+        const wlAdd = $('wl-add'); if (wlAdd) wlAdd.onclick = addWhitelistItem;
+        const wlDefaults = $('wl-defaults'); if (wlDefaults) wlDefaults.onclick = restoreWhitelistDefaults;
+
+        // 设置中心（本地偏好，不触碰后端核心逻辑）
+        const bindSetting = (id, fn) => { const el = $(id); if (el) el.onchange = fn; };
+        bindSetting('setting-theme', e => { state.settings.theme = e.target.value; applyPrefs(); });
+        bindSetting('setting-home-tab', e => { state.settings.homeTab = e.target.value; });
+        bindSetting('setting-compact', e => { state.settings.compact = e.target.checked; applyPrefs(); });
+        bindSetting('setting-cmd-width', e => { state.settings.cmdWidth = e.target.value; applyPrefs(); });
+        bindSetting('setting-auto-proc', e => { state.autoRefresh.processes = e.target.checked; updateAutoIndicator(); });
+        bindSetting('setting-auto-port', e => { state.autoRefresh.ports = e.target.checked; updateAutoIndicator(); });
+        bindSetting('setting-auto-svc', e => { state.autoRefresh.services = e.target.checked; updateAutoIndicator(); });
+        const saveBtn = $('settings-save');
+        if (saveBtn) saveBtn.onclick = async () => { await saveServerSettings(); syncSettingsForm(); const s = $('settings-status'); if (s) s.textContent = '已保存到 appdata/settings.json'; UI.toast('设置已保存', 'success', 1600); };
+        const resetBtn = $('settings-reset');
+        if (resetBtn) resetBtn.onclick = async () => { localStorage.removeItem(PREF_KEY); try { const r = await Api.settingsReset(); state.settings = Object.assign(state.settings, r.settings || {}); if (r.settings && r.settings.autoRefresh) state.autoRefresh = Object.assign(state.autoRefresh, r.settings.autoRefresh); } catch(e) { state.settings = { theme: 'system', compact: false, homeTab: 'dashboard', cmdWidth: 'normal' }; state.autoRefresh = { processes: true, ports: true, services: true }; } applyPrefs(); syncSettingsForm(); UI.toast('已恢复默认设置', 'success', 1600); };
+        const refreshAllBtn = $('settings-refresh-all');
+        if (refreshAllBtn) refreshAllBtn.onclick = () => { refreshAll(); UI.toast('已刷新全部数据', 'success', 1500); };
+        const exportBtn = $('settings-export-prefs');
+        if (exportBtn) exportBtn.onclick = () => { const p = savePrefs(); navigator.clipboard && navigator.clipboard.writeText(JSON.stringify(p, null, 2)); UI.toast('偏好 JSON 已复制到剪贴板', 'success', 2000); };
+        syncSettingsForm();
     }
 
     function switchTab(name) {
         state.currentTab = name;
+        updateWorkspaceTitle(name);
         document.querySelectorAll('.tab').forEach(t => {
             t.classList.toggle('active', t.dataset.tab === name);
         });
@@ -197,6 +377,8 @@
         else if (name === 'audit') { if (window.PGExtra) window.PGExtra.refreshAudit(); }
         else if (name === 'system') refreshSystem();
         else if (name === 'whitelist') loadWhitelist();
+        else if (name === 'settings') syncSettingsForm();
+        updateAutoIndicator();
     }
 
     function refreshAll() {
@@ -248,41 +430,34 @@
     function renderProcesses(procs) {
         const tbody = $('proc-tbody');
         if (procs.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="13" style="text-align:center;color:var(--text-3);padding:40px">无匹配进程</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--text-3);padding:40px">无匹配进程</td></tr>';
             return;
         }
         const rows = procs.map(p => {
             const prot = p.protected ? 'protected' : '';
             const badge = p.protected ? `<span class="badge badge-protected" title="${UI.escapeHtml(p.protected_reason)}">🔒</span>` : '';
-            const portsHtml = (p.ports || []).map(pt =>
-                `<span class="badge badge-listening">${pt.proto.toUpperCase()} ${pt.port}</span>`
-            ).join(' ');
+            const portList = (p.ports || []);
+            const portsHtml = portList.slice(0, 2).map(pt => `<span class="port-pill">${pt.proto.toUpperCase()} ${pt.port}</span>`).join(' ') + (portList.length > 2 ? ` <span class="muted">+${portList.length - 2}</span>` : '');
+            const riskText = UI.escapeHtml(String(p.risk_label || '-').replace('风险', ''));
+            const appLine = p.app_name ? `<span class="badge badge-app" title="${UI.escapeHtml(p.app_id || '')}">${UI.escapeHtml(p.app_name)}</span>` : `<span class="proc-name">${UI.escapeHtml(p.comm || '-')}</span>`;
             return `<tr class="${prot}">
                 <td><button class="link-btn proc-detail" data-pid="${p.pid}"><b>${p.pid}</b></button> ${badge}</td>
-                <td>${p.ppid || '-'}</td>
                 <td>${UI.escapeHtml(p.user)}</td>
-                <td>${p.app_name ? `<span class="badge badge-app" title="${UI.escapeHtml(p.app_id || '')}">${UI.escapeHtml(p.app_name)}</span>` : '<span class="muted">-</span>'}</td>
-                <td style="text-align:right">${p.pcpu.toFixed(1)}</td>
-                <td style="text-align:right">${p.pmem.toFixed(1)}</td>
-                <td style="text-align:right;color:var(--text-3)">${UI.fmtBytes(p.rss * 1024)}</td>
-                <td style="color:var(--text-3)">${UI.escapeHtml(p.etime)}</td>
-                <td class="col-cmd" title="${UI.escapeHtml(p.cmdline)}"><span class="cmd-text">${UI.escapeCmd(p.cmdline)}</span></td>
-                <td>${portsHtml || '<span class="muted">-</span>'}</td>
-                <td><span class="badge risk-${p.risk_level}" title="${UI.escapeHtml((p.risk_reasons || []).join('；'))}">${UI.escapeHtml(p.risk_label || '-')}</span></td>
-                <td>
-                    <button class="action-btn detail proc-detail" data-pid="${p.pid}">详情</button>
+                <td class="proc-app-cell">${appLine}<small>${UI.escapeHtml(p.comm || '')}</small></td>
+                <td class="num cpu-cell">${Number(p.pcpu || 0).toFixed(1)}</td>
+                <td class="num mem-cell">${Number(p.pmem || 0).toFixed(1)}</td>
+                <td class="cmd-cell" title="${UI.escapeHtml(p.cmdline)}"><b>${UI.escapeHtml(p.comm || '')}</b><span>${UI.escapeCmd(p.cmdline || '')}</span></td>
+                <td class="ports-cell">${portsHtml || '<span class="muted">-</span>'}</td>
+                <td class="risk-cell"><span class="risk-dot risk-${p.risk_level}" title="${UI.escapeHtml((p.risk_reasons || []).join('；'))}"></span><span>${riskText}</span></td>
+                <td class="op-cell">
+                    <button class="action-btn detail proc-detail" data-pid="${p.pid}">查看</button>
                     <button class="action-btn kill" data-pid="${p.pid}" data-cmd="${UI.escapeHtml(p.comm)}" data-risk="${p.risk_level}" data-policy="${p.kill_policy}" data-phrase="${p.confirm_phrase || ''}" data-label="${UI.escapeHtml(p.risk_label || '')}">结束</button>
                 </td>
             </tr>`;
         }).join('');
         tbody.innerHTML = rows;
-
-        tbody.querySelectorAll('.action-btn.kill').forEach(btn => {
-            btn.onclick = () => killProcessHandler(btn);
-        });
-        tbody.querySelectorAll('.proc-detail').forEach(btn => {
-            btn.onclick = () => showProcessDetail(btn.dataset.pid);
-        });
+        tbody.querySelectorAll('.action-btn.kill').forEach(btn => { btn.onclick = () => killProcessHandler(btn); });
+        tbody.querySelectorAll('.proc-detail').forEach(btn => { btn.onclick = () => showProcessDetail(btn.dataset.pid); });
     }
 
     async function killProcessHandler(btn) {
@@ -326,25 +501,37 @@
         try {
             const r = await Api.process(pid);
             const p = r.process;
-            $('drawer-title').textContent = `进程详情 PID ${p.pid}`;
+            $('drawer-title').textContent = `${p.comm || '进程'} · PID ${p.pid}`;
             const ports = (p.ports || []).map(pt => `<span class="badge badge-listening">${pt.proto.toUpperCase()} ${pt.port}</span>`).join(' ') || '<span class="muted">无监听端口</span>';
-            const children = (p.children || []).map(c => `<tr><td>${c.pid}</td><td>${UI.escapeHtml(c.comm)}</td><td>${UI.escapeHtml(c.user)}</td><td>${c.pcpu.toFixed ? c.pcpu.toFixed(1) : c.pcpu}</td><td>${c.pmem.toFixed ? c.pmem.toFixed(1) : c.pmem}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">无子进程</td></tr>';
+            const reasons = (p.risk_reasons || []).map(x => `<li>${UI.escapeHtml(x)}</li>`).join('') || '<li class="muted">无明显风险原因</li>';
+            const children = (p.children || []).map(c => `<tr><td>${c.pid}</td><td>${UI.escapeHtml(c.comm)}</td><td>${UI.escapeHtml(c.user)}</td><td>${Number(c.pcpu||0).toFixed(1)}</td><td>${Number(c.pmem||0).toFixed(1)}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">无子进程</td></tr>';
             $('drawer-body').innerHTML = `
-                <div class="detail-grid">
-                    <div><b>进程</b><span>${UI.escapeHtml(p.comm)}</span></div>
-                    <div><b>用户</b><span>${UI.escapeHtml(p.user)}</span></div>
-                    <div><b>父进程</b><span>${p.ppid || '-'} ${UI.escapeHtml(p.parent_name || '')}</span></div>
+                <div class="tool-detail-hero">
+                    <div><span class="muted">${UI.escapeHtml(p.user || '-')}</span><h3>${UI.escapeHtml(p.comm || p.cmdline || '-')}</h3><p>PID ${p.pid} · PPID ${p.ppid || '-'} · ${UI.escapeHtml(p.etime || '-')}</p></div>
+                    <span class="badge risk-${p.risk_level}">${UI.escapeHtml(p.risk_label || '-')}</span>
+                </div>
+                <div class="metric-strip">
+                    <div><b>${Number(p.pcpu||0).toFixed(1)}%</b><span>CPU</span></div>
+                    <div><b>${Number(p.pmem||0).toFixed(1)}%</b><span>MEM</span></div>
+                    <div><b>${UI.fmtBytes((p.rss||0) * 1024)}</b><span>RSS</span></div>
+                    <div><b>${(p.children||[]).length}</b><span>子进程</span></div>
+                </div>
+                <div class="detail-grid tool-grid">
                     <div><b>应用</b><span>${UI.escapeHtml(p.app_name || '-')}</span></div>
-                    <div><b>风险</b><span class="badge risk-${p.risk_level}">${UI.escapeHtml(p.risk_label || '-')}</span></div>
-                    <div><b>资源</b><span>CPU ${p.pcpu}% / MEM ${p.pmem}% / RSS ${UI.fmtBytes(p.rss * 1024)}</span></div>
+                    <div><b>保护状态</b><span>${p.protected ? '🔒 ' + UI.escapeHtml(p.protected_reason || 'protected') : '未保护'}</span></div>
                     <div><b>端口</b><span>${ports}</span></div>
+                    <div><b>父进程</b><span>${p.ppid || '-'} ${UI.escapeHtml(p.parent_name || '')}</span></div>
                     <div><b>cwd</b><span>${UI.escapeHtml(p.cwd || '-')}</span></div>
                     <div><b>exe</b><span>${UI.escapeHtml(p.exe || '-')}</span></div>
                 </div>
-                <h4>命令行</h4><pre class="detail-pre">${UI.escapeHtml(p.cmdline || p.args || '')}</pre>
+                <h4>完整命令行</h4><pre class="detail-pre">${UI.escapeHtml(p.cmdline || p.args || '')}</pre>
+                <h4>风险原因</h4><ul class="risk-list">${reasons}</ul>
+                <div class="drawer-actions"><button class="danger" data-kill-pid="${p.pid}">结束进程</button><button id="drawer-refresh-proc">刷新详情</button></div>
                 <h4>子进程 (${p.child_count || 0})</h4>
                 <table class="mini-table"><thead><tr><th>PID</th><th>名称</th><th>用户</th><th>CPU</th><th>MEM</th></tr></thead><tbody>${children}</tbody></table>
             `;
+            const k = $('drawer-body').querySelector('[data-kill-pid]'); if (k) k.onclick = () => killProcess(p.pid, p.risk_level >= 2 ? 'danger' : 'normal');
+            const rr = $('drawer-refresh-proc'); if (rr) rr.onclick = () => showProcessDetail(p.pid);
             $('proc-drawer').classList.remove('hidden');
         } catch (e) {
             UI.toast('加载详情失败: ' + e.message, 'error');
@@ -544,15 +731,48 @@
     }
 
     // ==================== 白名单 ====================
+    const WL_FIELDS = ['pids', 'users', 'process_names', 'cmdline_keywords', 'ports'];
+    const WL_LABELS = { pids: 'PID', users: '用户', process_names: '进程名', cmdline_keywords: '命令关键词', ports: '端口' };
+
+    function readWhitelistForm() {
+        const parseLines = (s) => String(s || '').split('\n').map(l => l.trim()).filter(Boolean);
+        return {
+            pids: parseLines($('wl-pids').value).map(s => parseInt(s, 10)).filter(n => Number.isFinite(n)),
+            users: parseLines($('wl-users').value),
+            process_names: parseLines($('wl-process_names').value),
+            cmdline_keywords: parseLines($('wl-cmdline_keywords').value),
+            ports: parseLines($('wl-ports').value).map(s => parseInt(s, 10)).filter(n => Number.isFinite(n))
+        };
+    }
+
+    function writeWhitelistForm(w) {
+        $('wl-pids').value = (w.pids || []).join('\n');
+        $('wl-users').value = (w.users || []).join('\n');
+        $('wl-process_names').value = (w.process_names || []).join('\n');
+        $('wl-cmdline_keywords').value = (w.cmdline_keywords || []).join('\n');
+        $('wl-ports').value = (w.ports || []).join('\n');
+        renderWhitelistChips(w);
+    }
+
+    function renderWhitelistChips(w) {
+        const tbody = $('wl-rule-tbody');
+        if (!tbody) return;
+        const rows = [];
+        WL_FIELDS.forEach(f => (w[f] || []).forEach(v => rows.push({ field: f, value: v })));
+        tbody.innerHTML = rows.length ? rows.map(r => `<tr><td><span class="rule-type">${WL_LABELS[r.field]}</span></td><td><code>${UI.escapeHtml(String(r.value))}</code></td><td><button class="action-btn" data-wl-field="${r.field}" data-wl-value="${UI.escapeHtml(String(r.value))}">删除</button></td></tr>`).join('') : '<tr><td colspan="3" class="muted" style="text-align:center;padding:24px">暂无自定义规则</td></tr>';
+        tbody.querySelectorAll('[data-wl-field]').forEach(btn => btn.onclick = () => {
+            const data = readWhitelistForm();
+            const f = btn.dataset.wlField; const v = btn.dataset.wlValue;
+            data[f] = (data[f] || []).filter(x => String(x) !== String(v));
+            writeWhitelistForm(data);
+        });
+    }
+
     async function loadWhitelist() {
         try {
             const r = await Api.whitelist();
             const w = r.whitelist || {};
-            $('wl-pids').value = (w.pids || []).join('\n');
-            $('wl-users').value = (w.users || []).join('\n');
-            $('wl-process_names').value = (w.process_names || []).join('\n');
-            $('wl-cmdline_keywords').value = (w.cmdline_keywords || []).join('\n');
-            $('wl-ports').value = (w.ports || []).join('\n');
+            writeWhitelistForm(w);
             $('wl-status').textContent = '已加载';
         } catch (e) {
             $('wl-status').textContent = '加载失败: ' + e.message;
@@ -560,22 +780,39 @@
     }
 
     async function saveWhitelist() {
-        const parseLines = (s) => s.split('\n').map(l => l.trim()).filter(Boolean);
-        const body = {
-            pids: parseLines($('wl-pids').value).map(s => parseInt(s, 10)).filter(n => Number.isFinite(n)),
-            users: parseLines($('wl-users').value),
-            process_names: parseLines($('wl-process_names').value),
-            cmdline_keywords: parseLines($('wl-cmdline_keywords').value),
-            ports: parseLines($('wl-ports').value).map(s => parseInt(s, 10)).filter(n => Number.isFinite(n))
-        };
+        const body = readWhitelistForm();
         try {
-            await Api.whitelistUpdate(body);
+            const r = await Api.whitelistUpdate(body);
+            writeWhitelistForm(r.whitelist || body);
             UI.toast('白名单已保存', 'success');
-            $('wl-status').textContent = '已保存';
+            $('wl-status').textContent = '已保存到 appdata/config.json';
         } catch (e) {
             UI.toast('保存失败: ' + e.message, 'error');
             $('wl-status').textContent = '保存失败';
         }
+    }
+
+    function addWhitelistItem() {
+        const type = $('wl-add-type').value;
+        const raw = $('wl-add-value').value.trim();
+        if (!raw) return;
+        const data = readWhitelistForm();
+        let val = raw;
+        if (type === 'pids' || type === 'ports') {
+            val = parseInt(raw, 10);
+            if (!Number.isFinite(val) || val < 1) { UI.toast('请输入有效数字', 'error'); return; }
+        }
+        data[type] = Array.from(new Set([...(data[type] || []), val]));
+        writeWhitelistForm(data);
+        $('wl-add-value').value = '';
+    }
+
+    async function restoreWhitelistDefaults() {
+        const ok = await UI.confirm('恢复默认白名单', '将恢复 PID 1/2 保护并清空其它自定义白名单，确定继续？');
+        if (!ok) return;
+        const d = { pids: [1, 2], users: [], process_names: [], cmdline_keywords: [], ports: [] };
+        writeWhitelistForm(d);
+        await saveWhitelist();
     }
 
     // ==================== 工具 ====================
@@ -585,5 +822,11 @@
     }
 
     // ==================== 启动 ====================
-    document.addEventListener('DOMContentLoaded', bindLogin);
+    document.addEventListener('DOMContentLoaded', async () => {
+        loadPrefs();
+        await loadServerSettings();
+        applyPrefs();
+        updateWorkspaceTitle(state.currentTab || 'dashboard');
+        bindLogin();
+    });
 })();
