@@ -1,4 +1,4 @@
-// proc-guardian 前端主逻辑 v1.4.2
+// proc-guardian 前端主逻辑 v1.5.0
 (function() {
     'use strict';
 
@@ -23,7 +23,7 @@
 
 
 
-    const PREF_KEY = 'proc_guardian_prefs_v142';
+    const PREF_KEY = 'proc_guardian_prefs_v150';
     const tabMeta = {
         dashboard: ['总览', '系统运行态、应用、端口和安全操作总览'],
         apps: ['应用', '飞牛应用、进程、端口和资源占用聚合'],
@@ -35,6 +35,21 @@
         whitelist: ['安全策略', '白名单、保护对象和高危操作策略'],
         settings: ['设置中心', '界面偏好、刷新行为、安全入口和数据维护']
     };
+
+
+    function installGlobalErrorGuard() {
+        window.addEventListener('error', (event) => {
+            const msg = event && event.message ? event.message : '未知前端错误';
+            console.error('frontend error:', event.error || msg);
+            if (window.UI && UI.toast) UI.toast('操作失败: ' + msg, 'error', 5000);
+        });
+        window.addEventListener('unhandledrejection', (event) => {
+            const reason = event && event.reason;
+            const msg = reason && reason.message ? reason.message : String(reason || '未知异步错误');
+            console.error('frontend promise rejection:', reason || msg);
+            if (window.UI && UI.toast) UI.toast('操作失败: ' + msg, 'error', 5000);
+        });
+    }
 
     function loadPrefs() {
         try {
@@ -485,9 +500,20 @@
         try {
             const body = { pid: parseInt(pid, 10), signal: 'SIGTERM', force: true };
             if (phrase) body.confirm_phrase = phrase;
-            const r = await Api.killProcess(pid, body);
-            UI.toast(`已结束进程 ${pid}`, 'success');
-            setTimeout(refreshProcesses, 500);
+            await Api.killProcess(pid, body);
+            UI.toast(`已发送结束信号 ${pid}`, 'success');
+            setTimeout(async () => {
+                await refreshProcesses();
+                if (btn.dataset.fromDrawer === '1' && !$('proc-drawer').classList.contains('hidden')) {
+                    try {
+                        await showProcessDetail(pid);
+                        UI.toast(`进程 ${pid} 仍在运行，已刷新详情`, 'warn', 4000);
+                    } catch (detailErr) {
+                        closeProcessDrawer();
+                        UI.toast(`进程 ${pid} 已结束`, 'success');
+                    }
+                }
+            }, 500);
         } catch (e) {
             UI.toast('结束失败: ' + e.message, 'error', 5000);
         }
@@ -505,6 +531,12 @@
             const ports = (p.ports || []).map(pt => `<span class="badge badge-listening">${pt.proto.toUpperCase()} ${pt.port}</span>`).join(' ') || '<span class="muted">无监听端口</span>';
             const reasons = (p.risk_reasons || []).map(x => `<li>${UI.escapeHtml(x)}</li>`).join('') || '<li class="muted">无明显风险原因</li>';
             const children = (p.children || []).map(c => `<tr><td>${c.pid}</td><td>${UI.escapeHtml(c.comm)}</td><td>${UI.escapeHtml(c.user)}</td><td>${Number(c.pcpu||0).toFixed(1)}</td><td>${Number(c.pmem||0).toFixed(1)}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">无子进程</td></tr>';
+            const killPolicy = p.kill_policy || (p.protected ? 'deny' : (p.risk_level >= 2 ? 'strict' : 'normal'));
+            const confirmPhrase = p.confirm_phrase || '';
+            const riskLabel = p.risk_label || '';
+            const killLabel = killPolicy === 'deny' ? '受保护' : (killPolicy === 'strict' ? '高危结束' : (killPolicy === 'warn' ? '结束应用进程' : '结束进程'));
+            const killDisabled = killPolicy === 'deny' ? ' disabled title="受保护进程禁止结束"' : '';
+            const protectText = killPolicy === 'deny' ? '🔒 受保护，禁止结束' : (killPolicy === 'strict' ? '⚠️ 高危操作，需输入确认短语' : (killPolicy === 'warn' ? '⚠️ 应用/高权限进程，需二次确认' : '可结束'));
             $('drawer-body').innerHTML = `
                 <div class="tool-detail-hero">
                     <div><span class="muted">${UI.escapeHtml(p.user || '-')}</span><h3>${UI.escapeHtml(p.comm || p.cmdline || '-')}</h3><p>PID ${p.pid} · PPID ${p.ppid || '-'} · ${UI.escapeHtml(p.etime || '-')}</p></div>
@@ -518,7 +550,7 @@
                 </div>
                 <div class="detail-grid tool-grid">
                     <div><b>应用</b><span>${UI.escapeHtml(p.app_name || '-')}</span></div>
-                    <div><b>保护状态</b><span>${p.protected ? '🔒 ' + UI.escapeHtml(p.protected_reason || 'protected') : '未保护'}</span></div>
+                    <div><b>保护状态</b><span>${UI.escapeHtml(protectText)}</span></div>
                     <div><b>端口</b><span>${ports}</span></div>
                     <div><b>父进程</b><span>${p.ppid || '-'} ${UI.escapeHtml(p.parent_name || '')}</span></div>
                     <div><b>cwd</b><span>${UI.escapeHtml(p.cwd || '-')}</span></div>
@@ -526,11 +558,11 @@
                 </div>
                 <h4>完整命令行</h4><pre class="detail-pre">${UI.escapeHtml(p.cmdline || p.args || '')}</pre>
                 <h4>风险原因</h4><ul class="risk-list">${reasons}</ul>
-                <div class="drawer-actions"><button class="danger" data-kill-pid="${p.pid}">结束进程</button><button id="drawer-refresh-proc">刷新详情</button></div>
+                <div class="drawer-actions"><button class="danger" data-kill-pid="${p.pid}" data-pid="${p.pid}" data-cmd="${UI.escapeHtml(p.comm || p.cmdline || '')}" data-policy="${killPolicy}" data-phrase="${confirmPhrase}" data-label="${UI.escapeHtml(riskLabel)}" data-from-drawer="1"${killDisabled}>${killLabel}</button><button id="drawer-refresh-proc">刷新详情</button></div>
                 <h4>子进程 (${p.child_count || 0})</h4>
                 <table class="mini-table"><thead><tr><th>PID</th><th>名称</th><th>用户</th><th>CPU</th><th>MEM</th></tr></thead><tbody>${children}</tbody></table>
             `;
-            const k = $('drawer-body').querySelector('[data-kill-pid]'); if (k) k.onclick = () => killProcess(p.pid, p.risk_level >= 2 ? 'danger' : 'normal');
+            const k = $('drawer-body').querySelector('[data-kill-pid]'); if (k && !k.disabled) k.onclick = () => killProcessHandler(k);
             const rr = $('drawer-refresh-proc'); if (rr) rr.onclick = () => showProcessDetail(p.pid);
             $('proc-drawer').classList.remove('hidden');
         } catch (e) {
@@ -823,6 +855,7 @@
 
     // ==================== 启动 ====================
     document.addEventListener('DOMContentLoaded', async () => {
+        installGlobalErrorGuard();
         loadPrefs();
         await loadServerSettings();
         applyPrefs();

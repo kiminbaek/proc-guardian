@@ -1361,3 +1361,7 @@ body[data-cmd-width="compact"] .proc-table .cg-cmd { width: 330px; }
 .wl-rule-table th,
 .wl-rule-table td { padding: 8px 10px; }
 .advanced-editor { padding: 8px 10px; }
+
+
+/* ====== v1.5.0 detail kill action reliability ====== */
+.drawer-actions button[disabled] { opacity: .55; cursor: not-allowed; filter: grayscale(.2); }
