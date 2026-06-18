@@ -504,7 +504,7 @@
             UI.toast(`已发送结束信号 ${pid}`, 'success');
             setTimeout(async () => {
                 await refreshProcesses();
-                if (btn.dataset.fromDrawer === '1' && !$('proc-drawer').classList.contains('hidden')) {
+                if (btn.dataset.fromDrawer === '1' && $('proc-drawer').classList.contains('open')) {
                     try {
                         await showProcessDetail(pid);
                         UI.toast(`进程 ${pid} 仍在运行，已刷新详情`, 'warn', 4000);
@@ -520,6 +520,7 @@
     }
 
     function closeProcessDrawer() {
+        $('proc-drawer').classList.remove('open');
         $('proc-drawer').classList.add('hidden');
     }
 
@@ -565,6 +566,7 @@
             const k = $('drawer-body').querySelector('[data-kill-pid]'); if (k && !k.disabled) k.onclick = () => killProcessHandler(k);
             const rr = $('drawer-refresh-proc'); if (rr) rr.onclick = () => showProcessDetail(p.pid);
             $('proc-drawer').classList.remove('hidden');
+            $('proc-drawer').classList.add('open');
         } catch (e) {
             UI.toast('加载详情失败: ' + e.message, 'error');
         }
@@ -720,36 +722,41 @@
             const diskUsedGB = (r.disk.used / 1024 / 1024 / 1024).toFixed(2);
             const diskTotalGB = (r.disk.total / 1024 / 1024 / 1024).toFixed(2);
 
+            const cpuUsage = (r.cpu && Number.isFinite(r.cpu.usage)) ? r.cpu.usage : 0;
+            const diskPercent = parseInt(r.disk.percent || '0', 10);
             grid.innerHTML = `
                 <div class="sys-card">
-                    <h3>运行时间</h3>
+                    <h3>⏱️ 运行时间</h3>
                     <div class="sys-value">${UI.fmtUptime(r.uptime_seconds)}</div>
                     <div class="sys-sub">Load: ${UI.escapeHtml(r.loadavg)}</div>
                 </div>
                 <div class="sys-card">
-                    <h3>CPU</h3>
-                    <div class="sys-value">${r.cpu.count} 核</div>
-                    <div class="sys-sub">${UI.escapeHtml(r.cpu.model || '')}</div>
+                    <h3>⚡ CPU</h3>
+                    <div class="sys-value">${r.cpu.count} 核 · ${cpuUsage}%</div>
+                    <div class="progress-bar"><div class="progress-fill" style="width: ${Math.min(cpuUsage, 100)}%"></div></div>
+                    <div class="sys-sub" style="margin-top:10px">${UI.escapeHtml(r.cpu.model || '')}</div>
                 </div>
                 <div class="sys-card">
-                    <h3>内存</h3>
+                    <h3>💾 内存</h3>
                     <div class="sys-value">${memPercent}%</div>
-                    <div class="sys-sub">${memUsedGB} / ${memTotalGB} GB</div>
+                    <div class="progress-bar"><div class="progress-fill" style="width: ${Math.min(memPercent, 100)}%"></div></div>
+                    <div class="sys-sub" style="margin-top:10px">${memUsedGB} / ${memTotalGB} GB</div>
                 </div>
                 <div class="sys-card">
-                    <h3>磁盘 (/vol3)</h3>
+                    <h3>📦 磁盘 (/vol3)</h3>
                     <div class="sys-value">${UI.escapeHtml(r.disk.percent || '0%')}</div>
-                    <div class="sys-sub">${diskUsedGB} / ${diskTotalGB} GB</div>
+                    <div class="progress-bar"><div class="progress-fill" style="width: ${Math.min(diskPercent, 100)}%"></div></div>
+                    <div class="sys-sub" style="margin-top:10px">${diskUsedGB} / ${diskTotalGB} GB</div>
                 </div>
                 <div class="sys-card">
-                    <h3>主机</h3>
+                    <h3>🌐 主机</h3>
                     <ul>
                         <li>主机名: <b>${UI.escapeHtml(r.hostname)}</b></li>
                         ${(r.ips || []).map(ip => `<li>IP: <b>${UI.escapeHtml(ip)}</b></li>`).join('')}
                     </ul>
                 </div>
                 <div class="sys-card">
-                    <h3>Node.js</h3>
+                    <h3>🟢 Node.js</h3>
                     <ul>
                         <li>版本: <b>${UI.escapeHtml(r.node.version)}</b></li>
                         <li>平台: <b>${UI.escapeHtml(r.node.platform)} / ${UI.escapeHtml(r.node.arch)}</b></li>

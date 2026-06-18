@@ -1,18 +1,67 @@
 #!/bin/bash
-# 卸载回调：清理残留进程
+# proc-guardian 卸载回调 v1.7.4
+# - 停止应用进程
+# - 可选：根据用户选择清除数据
 
-LOG_FILE="${TRIM_PKGVAR}/info.log"
+LOG_FILE="${TRIM_PKGVAR}/uninstall.log"
+mkdir -p "${TRIM_PKGVAR}" 2>/dev/null || true
+
 log_msg() {
-    [ -n "${LOG_FILE}" ] && [ -d "$(dirname ${LOG_FILE})" ] && \
-        echo "$(date '+%Y-%m-%d %H:%M:%S') - [uninstall] $1" >> ${LOG_FILE} 2>/dev/null
+    echo "[$(date '+%F %T')] $*" | tee -a "${LOG_FILE}" 2>/dev/null || true
 }
 
-# 杀残留 node 进程
+log_msg "=== proc-guardian 卸载开始 ==="
+log_msg "环境变量: wizard_data_action=${wizard_data_action:-<未设置>}"
+
+# 停止应用进程（先TERM，再KILL）
+PID_FILE="${TRIM_PKGVAR}/app.pid"
+if [ -f "${PID_FILE}" ]; then
+    pid=$(head -n 1 "${PID_FILE}" | tr -d '[:space:]')
+    if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+        log_msg "正在停止进程 (PID: ${pid})..."
+        kill -TERM "${pid}" 2>/dev/null || true
+        count=0
+        while kill -0 "${pid}" 2>/dev/null && [ ${count} -lt 10 ]; do
+            sleep 1
+            count=$((count + 1))
+        done
+        if kill -0 "${pid}" 2>/dev/null; then
+            kill -KILL "${pid}" 2>/dev/null || true
+            log_msg "进程已强制停止"
+        else
+            log_msg "进程已正常停止"
+        fi
+    fi
+    rm -f "${PID_FILE}" 2>/dev/null || true
+fi
+
+# 杀残留的 node 进程（兜底）
 pkill -KILL -u proc_guardian -f "node server.js" 2>/dev/null || true
 
-# 杀占用 8877 的进程
+# 杀占用 8877 端口的进程（兜底）
 pid_8877=$(ss -tlnp 2>/dev/null | grep ':8877 ' | grep -oP 'pid=\K[0-9]+' | head -1)
-[ -n "${pid_8877}" ] && kill -KILL "${pid_8877}" 2>/dev/null || true
+if [ -n "${pid_8877}" ]; then
+    log_msg "强制停止占用 8877 端口的进程 (PID: ${pid_8877})"
+    kill -KILL "${pid_8877}" 2>/dev/null || true
+fi
 
-log_msg "Uninstall cleanup done"
+log_msg "进程清理完成"
+
+# 根据用户选择处理数据（radio: keep/delete）
+if [ "${wizard_data_action}" = "delete" ]; then
+    log_msg "用户选择清除所有应用数据"
+    if [ -d "${TRIM_PKGVAR}" ]; then
+        log_msg "正在清除数据目录: ${TRIM_PKGVAR}"
+        # 保留顶级目录（防止 fnOS 路径引用出错），但删除所有内容
+        find "${TRIM_PKGVAR}" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null || true
+        log_msg "数据已清除"
+    fi
+    log_msg "=== proc-guardian 卸载完成（已清除数据）==="
+else
+    log_msg "保留应用数据（用户选择保留）"
+    # 只删除 PID 文件，保留其他数据
+    rm -f "${TRIM_PKGVAR}/app.pid" 2>/dev/null || true
+    log_msg "=== proc-guardian 卸载完成（保留数据）==="
+fi
+
 exit 0
