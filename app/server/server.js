@@ -46,8 +46,14 @@ app.use('/api/apps',      require('./routers/apps'));
 app.use('/api/audit',     require('./routers/auditlog'));
 app.use('/api/settings',  require('./routers/settings'));
 
-// 静态文件
-app.use(express.static(path.join(__dirname, '..', 'ui')));
+// 静态文件 - JS/CSS 不强缓存，防止升级后浏览器用旧版
+app.use(express.static(path.join(__dirname, '..', 'ui'), {
+    setHeaders: (res, filepath) => {
+        if (filepath.endsWith('.js') || filepath.endsWith('.css')) {
+            res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+        }
+    }
+}));
 
 // === BUG #6 修复：错误处理不泄漏堆栈 ===
 app.use((err, req, res, next) => {
