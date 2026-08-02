@@ -1,0 +1,7 @@
+{
+    "type": "http",
+    "path": "/",
+    "expect_status": [200, 302, 401, 403],
+    "startup_timeout_seconds": 30,
+    "post_install_warmup_seconds": 5
+}

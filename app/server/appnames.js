@@ -44,7 +44,6 @@ const SYSTEM_SERVICES = {
   'cron':         { app_id: 'system', app_name: '定时任务' },
   'atd':          { app_id: 'system', app_name: '一次性任务' },
   'fail2ban-server': { app_id: 'system', app_name: 'Fail2ban 安全防护' },
-  'nginx':        { app_id: 'system', app_name: 'Nginx Web 服务' },
   // QwenPaw
   'qwenpaw':      { app_id: 'com.dustinky.qwenpaw', app_name: 'QwenPaw 智能管家' },
   'qwenpaw-cli':  { app_id: 'com.dustinky.qwenpaw', app_name: 'QwenPaw 命令行' },

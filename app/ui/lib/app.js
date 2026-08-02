@@ -23,7 +23,7 @@
 
 
 
-    const PREF_KEY = 'proc_guardian_prefs_v150';
+    const PREF_KEY = 'proc_guardian_prefs_v180';
     const tabMeta = {
         dashboard: ['总览', '系统运行态、应用、端口和安全操作总览'],
         apps: ['应用', '飞牛应用、进程、端口和资源占用聚合'],
@@ -498,22 +498,27 @@
         if (!ok) return;
 
         try {
-            const body = { pid: parseInt(pid, 10), signal: 'SIGTERM', force: true };
+            // S1 修复：先 SIGTERM 优雅退出，3s 后未退则 SIGKILL
+            const body = { pid: parseInt(pid, 10), signal: 'SIGTERM', force: false };
             if (phrase) body.confirm_phrase = phrase;
             await Api.killProcess(pid, body);
-            UI.toast(`已发送结束信号 ${pid}`, 'success');
+            UI.toast(`已发送 SIGTERM ${pid}，3s 后检查...`, 'success', 2000);
             setTimeout(async () => {
+                try {
+                    await Api.process(pid);
+                    try {
+                        await Api.killProcess(pid, { pid: parseInt(pid, 10), force: true, confirm_phrase: phrase });
+                        UI.toast(`${pid} 未响应 SIGTERM，已 SIGKILL`, 'warn', 3000);
+                    } catch (e2) {}
+                } catch (e2) {
+                    UI.toast(`${pid} 已优雅退出`, 'success', 2000);
+                }
                 await refreshProcesses();
                 if (btn.dataset.fromDrawer === '1' && $('proc-drawer').classList.contains('open')) {
-                    try {
-                        await showProcessDetail(pid);
-                        UI.toast(`进程 ${pid} 仍在运行，已刷新详情`, 'warn', 4000);
-                    } catch (detailErr) {
-                        closeProcessDrawer();
-                        UI.toast(`进程 ${pid} 已结束`, 'success');
-                    }
+                    try { await showProcessDetail(pid); }
+                    catch (e3) { closeProcessDrawer(); }
                 }
-            }, 500);
+            }, 3000);
         } catch (e) {
             UI.toast('结束失败: ' + e.message, 'error', 5000);
         }
@@ -603,7 +608,7 @@
         tbody.innerHTML = filtered.map(p => {
             const badge = p.protected ? `<span class="badge badge-protected" title="${UI.escapeHtml(p.protected_reason)}">🔒</span>` : '';
             const portBadge = `<span class="badge badge-listening">${p.port}</span>`;
-            const killBtn = p.pid ? `<button class="action-btn kill" data-pid="${p.pid}" data-cmd="${UI.escapeHtml(p.process_name || '')}" data-protected="${p.protected}">结束</button>` : '-';
+            const killBtn = p.pid ? `<button class="action-btn detail port-detail" data-pid="${p.pid}">查看</button>` : '-';
             return `<tr>
                 <td><b>${portBadge}</b></td>
                 <td>${p.proto.toUpperCase()}</td>
@@ -616,8 +621,8 @@
             </tr>`;
         }).join('');
 
-        tbody.querySelectorAll('.action-btn.kill').forEach(btn => {
-            btn.onclick = () => killProcessHandler(btn);
+        tbody.querySelectorAll('.port-detail').forEach(btn => {
+            btn.onclick = () => showProcessDetail(btn.dataset.pid);
         });
     }
 

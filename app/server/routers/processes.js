@@ -200,6 +200,9 @@ router.post('/kill', (req, res) => {
 
     try {
         const result = procMod.killProcess(pid, sig, force);
+        // M8 修复：kill 后清除进程缓存，避免刷新看到"僵尸"
+        procMod.clearCache();
+        portsMod.clearCache();
         audit.append('kill_process', { ...audit.fromReq(req), pid, comm: proc.comm, signal: sig, force, category: rk.category, risk_level: rk.risk_level, result: 'success' });
         res.json({ ok: true, risk: rk, ...result });
     } catch (e) {
@@ -220,8 +223,13 @@ router.post('/kill-by-name', (req, res) => {
     const targets = [];
     for (const p of all) {
         const wl = wlMod.checkProcess(p);
-        if (wl.protected) {
-            skipped.push({ pid: p.pid, reason: wl.reason });
+        // S2 修复：加入风险分级检查，deny/strict 策略的进程不能被批量杀
+        const app = appnames.getAppName(p);
+        const rk = risk.classify(p, app, wl);
+        if (wl.protected || rk.kill_policy === 'deny') {
+            skipped.push({ pid: p.pid, reason: wl.reason || rk.risk_label });
+        } else if (rk.kill_policy === 'strict') {
+            skipped.push({ pid: p.pid, reason: `高危进程：${rk.risk_label}（需单独确认）` });
         } else {
             targets.push(p);
         }

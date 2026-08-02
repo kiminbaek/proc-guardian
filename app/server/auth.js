@@ -82,6 +82,7 @@ function getStatus() {
 function validatePassword(p) {
     if (typeof p !== 'string' || p.length < 8) return 'password_too_short';
     if (p.length > 128) return 'password_too_long';
+    if (!/[a-zA-Z]/.test(p) || !/\d/.test(p)) return 'password_needs_letters_and_digits';
     return null;
 }
 function setupPassword(password) {

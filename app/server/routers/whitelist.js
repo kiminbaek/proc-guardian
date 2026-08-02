@@ -78,6 +78,18 @@ router.put('/', (req, res) => {
     }
 });
 
+router.post('/check', (req, res) => {
+    const pid = parseInt(req.body.pid, 10);
+    if (!Number.isFinite(pid) || pid < 1) {
+        return res.status(400).json({ ok: false, error: 'invalid_pid' });
+    }
+    const procMod = require('../process');
+    const proc = procMod.getProcessByPid(pid);
+    if (!proc) return res.status(404).json({ ok: false, error: 'process_not_found' });
+    const wl = whitelist.checkProcess(proc);
+    res.json({ ok: true, pid, protected: wl.protected, reason: wl.reason });
+});
+
 router.post('/reload', (req, res) => {
     whitelist.clearCache();
     res.json({ ok: true, hint: 'cache cleared' });
