@@ -1,4 +1,4 @@
-// proc-guardian 入口服务 v1.2.0
+// proc-guardian 入口服务 v1.8.2
 // 负责：注册路由 + 启动 HTTP 服务 + 优雅退出
 
 const express = require('express');
@@ -76,7 +76,7 @@ const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`[${ts}] proc-guardian listening on 0.0.0.0:${PORT}`);
     try {
         fs.appendFileSync(LOG_FILE,
-            `[${new Date().toISOString()}] [boot] proc-guardian v1.2.0 listening on ${PORT}\n`);
+            `[${new Date().toISOString()}] [boot] proc-guardian v1.8.2 listening on ${PORT}\n`);
     } catch (e) {}
 });
 

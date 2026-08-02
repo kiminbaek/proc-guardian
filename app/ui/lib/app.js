@@ -1,4 +1,4 @@
-// proc-guardian 前端主逻辑 v1.5.0
+// proc-guardian 前端主逻辑 v1.8.2
 (function() {
     'use strict';
 
@@ -479,7 +479,7 @@
         const pid = btn.dataset.pid;
         const cmd = btn.dataset.cmd;
         const policy = btn.dataset.policy || 'normal';
-        const phrase = btn.dataset.phrase || '';
+        let phrase = btn.dataset.phrase || '';
         const label = btn.dataset.label || '';
         let confirmBody = `确定要结束进程 <code>${pid}</code> (${UI.escapeHtml(cmd)}) 吗？<br>将先发送 <code>SIGTERM</code>，10s 后未退再发 <code>SIGKILL</code>。`;
         let ok = false;
@@ -487,11 +487,13 @@
             await UI.confirm('禁止结束', `<span style="color:var(--danger)">⛔ ${UI.escapeHtml(label)}禁止结束。</span>`);
             return;
         } else if (policy === 'strict') {
+            if (!phrase) phrase = 'STOP SYSTEM PROCESS';
             confirmBody = `<span style="color:var(--danger);font-weight:700">⚠️ 严正警告：这是${UI.escapeHtml(label)}，结束后会导致 NAS / 飞牛功能异常。</span><br><br>${confirmBody}`;
-            ok = await UI.promptConfirm('高危系统进程确认', confirmBody, phrase || 'STOP SYSTEM PROCESS');
+            ok = await UI.promptConfirm('高危系统进程确认', confirmBody, phrase);
         } else if (policy === 'warn') {
+            if (!phrase) phrase = 'STOP APP PROCESS';
             confirmBody = `<span style="color:var(--warn)">⚠️ 这是飞牛应用进程，结束会影响对应应用。</span><br><br>${confirmBody}`;
-            ok = await UI.promptConfirm('应用进程确认', confirmBody, phrase || 'STOP APP PROCESS');
+            ok = await UI.promptConfirm('应用进程确认', confirmBody, phrase);
         } else {
             ok = await UI.confirm('结束进程', confirmBody);
         }
@@ -500,7 +502,7 @@
         try {
             // S1 修复：先 SIGTERM 优雅退出，3s 后未退则 SIGKILL
             const body = { pid: parseInt(pid, 10), signal: 'SIGTERM', force: false };
-            if (phrase) body.confirm_phrase = phrase;
+            body.confirm_phrase = phrase;
             await Api.killProcess(pid, body);
             UI.toast(`已发送 SIGTERM ${pid}，3s 后检查...`, 'success', 2000);
             setTimeout(async () => {
@@ -564,7 +566,7 @@
                 </div>
                 <h4>完整命令行</h4><pre class="detail-pre">${UI.escapeHtml(p.cmdline || p.args || '')}</pre>
                 <h4>风险原因</h4><ul class="risk-list">${reasons}</ul>
-                <div class="drawer-actions"><button class="danger" data-kill-pid="${p.pid}" data-pid="${p.pid}" data-cmd="${UI.escapeHtml(p.comm || p.cmdline || '')}" data-policy="${killPolicy}" data-phrase="${confirmPhrase}" data-label="${UI.escapeHtml(riskLabel)}" data-from-drawer="1"${killDisabled}>${killLabel}</button><button id="drawer-refresh-proc">刷新详情</button></div>
+                <div class="drawer-actions"><button class="danger" data-kill-pid="${p.pid}" data-pid="${p.pid}" data-cmd="${UI.escapeHtml(p.comm || p.cmdline || '')}" data-policy="${killPolicy}" data-phrase="${UI.escapeHtml(confirmPhrase)}" data-label="${UI.escapeHtml(riskLabel)}" data-from-drawer="1"${killDisabled}>${killLabel}</button><button id="drawer-refresh-proc">刷新详情</button></div>
                 <h4>子进程 (${p.child_count || 0})</h4>
                 <table class="mini-table"><thead><tr><th>PID</th><th>名称</th><th>用户</th><th>CPU</th><th>MEM</th></tr></thead><tbody>${children}</tbody></table>
             `;
