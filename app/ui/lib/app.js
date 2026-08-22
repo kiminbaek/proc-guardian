@@ -1,4 +1,4 @@
-// proc-guardian 前端主逻辑 v1.8.2
+// proc-guardian 前端主逻辑 v1.9.0
 (function() {
     'use strict';
 
@@ -148,7 +148,9 @@
         document.body.dataset.theme = state.settings.theme || 'system';
         document.body.classList.toggle('compact-mode', !!state.settings.compact);
         document.body.dataset.cmdWidth = state.settings.cmdWidth || 'normal';
-        document.querySelectorAll('[data-cmd-width]').forEach(x => x.classList.toggle('active', x.dataset.cmdWidth === (state.settings.cmdWidth || 'normal')));
+        // v1.9.0：选择器要排除 body 自身 —— body 上刚设了 data-cmd-width，
+        // 原来的 querySelectorAll('[data-cmd-width]') 会连 body 一起加 .active。
+        document.querySelectorAll('button[data-cmd-width], .chip[data-cmd-width]').forEach(x => x.classList.toggle('active', x.dataset.cmdWidth === (state.settings.cmdWidth || 'normal')));
         updateAutoIndicator();
     }
 
@@ -371,7 +373,50 @@
         const refreshAllBtn = $('settings-refresh-all');
         if (refreshAllBtn) refreshAllBtn.onclick = () => { refreshAll(); UI.toast('已刷新全部数据', 'success', 1500); };
         const exportBtn = $('settings-export-prefs');
-        if (exportBtn) exportBtn.onclick = () => { const p = savePrefs(); navigator.clipboard && navigator.clipboard.writeText(JSON.stringify(p, null, 2)); UI.toast('偏好 JSON 已复制到剪贴板', 'success', 2000); };
+        if (exportBtn) exportBtn.onclick = async () => {
+            // v1.9.0：原实现只把偏好复制到剪贴板，与按钮旁的「导入设置」不对称，
+            // 且 downloadJson() 定义了却从未调用。改为下载服务端导出的完整设置 JSON。
+            try {
+                const r = await Api.settingsExport();
+                downloadJson('proc-guardian-settings.json', r.settings || savePrefs());
+                UI.toast('设置已导出为 JSON 文件', 'success', 2000);
+            } catch (e) {
+                downloadJson('proc-guardian-settings.json', savePrefs());
+                UI.toast('服务端导出失败，已导出本地偏好', 'warn', 2500);
+            }
+        };
+
+        // v1.9.0 修「导入设置按钮无任何事件绑定」：
+        //   index.html 有 #settings-import-prefs 按钮和 #settings-import-file 文件框，
+        //   但 app.js 里既没绑 onclick 也没调 Api.settingsImport，点了完全没反应。
+        const importBtn = $('settings-import-prefs');
+        const importFile = $('settings-import-file');
+        if (importBtn && importFile) {
+            importBtn.onclick = () => { importFile.value = ''; importFile.click(); };
+            importFile.onchange = async () => {
+                const f = importFile.files && importFile.files[0];
+                if (!f) return;
+                try {
+                    const text = await f.text();
+                    const parsed = JSON.parse(text);
+                    const payload = parsed && parsed.settings ? parsed.settings : parsed;
+                    const r = await Api.settingsImport({ settings: payload });
+                    if (r.settings) {
+                        state.settings = Object.assign(state.settings, r.settings);
+                        if (r.settings.autoRefresh) state.autoRefresh = Object.assign(state.autoRefresh, r.settings.autoRefresh);
+                    }
+                    savePrefs();
+                    applyPrefs();
+                    syncSettingsForm();
+                    const s = $('settings-status'); if (s) s.textContent = '已从文件导入并保存';
+                    UI.toast('设置已导入', 'success', 2000);
+                } catch (e) {
+                    UI.toast('导入失败：' + (e.message || '文件格式不正确'), 'error', 4000);
+                } finally {
+                    importFile.value = '';
+                }
+            };
+        }
         syncSettingsForm();
     }
 
@@ -454,19 +499,21 @@
             const portList = (p.ports || []);
             const portsHtml = portList.slice(0, 2).map(pt => `<span class="port-pill">${pt.proto.toUpperCase()} ${pt.port}</span>`).join(' ') + (portList.length > 2 ? ` <span class="muted">+${portList.length - 2}</span>` : '');
             const riskText = UI.escapeHtml(String(p.risk_label || '-').replace('风险', ''));
-            const appLine = p.app_name ? `<span class="badge badge-app" title="${UI.escapeHtml(p.app_id || '')}">${UI.escapeHtml(p.app_name)}</span>` : `<span class="proc-name">${UI.escapeHtml(p.comm || '-')}</span>`;
+            // v1.9.0：展示优先用完整进程名 name（内核 comm 恒截断到 15 字符）
+            const procName = p.name || p.comm || '-';
+            const appLine = p.app_name ? `<span class="badge badge-app" title="${UI.escapeHtml(p.app_id || '')}">${UI.escapeHtml(p.app_name)}</span>` : `<span class="proc-name">${UI.escapeHtml(procName)}</span>`;
             return `<tr class="${prot}">
                 <td><button class="link-btn proc-detail" data-pid="${p.pid}"><b>${p.pid}</b></button> ${badge}</td>
-                <td>${UI.escapeHtml(p.user)}</td>
-                <td class="proc-app-cell">${appLine}<small>${UI.escapeHtml(p.comm || '')}</small></td>
+                <td title="${UI.escapeHtml(p.user || '')}">${UI.escapeHtml(p.user)}</td>
+                <td class="proc-app-cell">${appLine}<small>${UI.escapeHtml(procName)}</small></td>
                 <td class="num cpu-cell">${Number(p.pcpu || 0).toFixed(1)}</td>
                 <td class="num mem-cell">${Number(p.pmem || 0).toFixed(1)}</td>
-                <td class="cmd-cell" title="${UI.escapeHtml(p.cmdline)}"><b>${UI.escapeHtml(p.comm || '')}</b><span>${UI.escapeCmd(p.cmdline || '')}</span></td>
+                <td class="cmd-cell" title="${UI.escapeHtml(p.cmdline)}"><b>${UI.escapeHtml(procName)}</b><span>${UI.escapeCmd(p.cmdline || '')}</span></td>
                 <td class="ports-cell">${portsHtml || '<span class="muted">-</span>'}</td>
                 <td class="risk-cell"><span class="risk-dot risk-${p.risk_level}" title="${UI.escapeHtml((p.risk_reasons || []).join('；'))}"></span><span>${riskText}</span></td>
                 <td class="op-cell">
                     <button class="action-btn detail proc-detail" data-pid="${p.pid}">查看</button>
-                    <button class="action-btn kill" data-pid="${p.pid}" data-cmd="${UI.escapeHtml(p.comm)}" data-risk="${p.risk_level}" data-policy="${p.kill_policy}" data-phrase="${p.confirm_phrase || ''}" data-label="${UI.escapeHtml(p.risk_label || '')}">结束</button>
+                    <button class="action-btn kill" data-pid="${p.pid}" data-cmd="${UI.escapeHtml(procName)}" data-risk="${p.risk_level}" data-policy="${p.kill_policy}" data-phrase="${p.confirm_phrase || ''}" data-label="${UI.escapeHtml(p.risk_label || '')}">结束</button>
                 </td>
             </tr>`;
         }).join('');
@@ -481,7 +528,7 @@
         const policy = btn.dataset.policy || 'normal';
         let phrase = btn.dataset.phrase || '';
         const label = btn.dataset.label || '';
-        let confirmBody = `确定要结束进程 <code>${pid}</code> (${UI.escapeHtml(cmd)}) 吗？<br>将先发送 <code>SIGTERM</code>，10s 后未退再发 <code>SIGKILL</code>。`;
+        let confirmBody = `确定要结束进程 <code>${pid}</code> (${UI.escapeHtml(cmd)}) 吗？<br>将先发送 <code>SIGTERM</code>，3s 后未退再发 <code>SIGKILL</code>。`;
         let ok = false;
         if (policy === 'deny') {
             await UI.confirm('禁止结束', `<span style="color:var(--danger)">⛔ ${UI.escapeHtml(label)}禁止结束。</span>`);
@@ -531,14 +578,59 @@
         $('proc-drawer').classList.add('hidden');
     }
 
+    // v1.9.0 修「killByName 无 UI 入口」：
+    //   后端 /api/processes/kill-by-name 与 Api.killByName 早已存在，
+    //   manifest 和 wizard 也都宣传"批量结束"，但界面上没有任何按钮能触发。
+    //   现在从进程详情抽屉提供「结束全部同名」入口，走两段式确认：
+    //   ① 先不带 confirm 拿到 targets/skipped 预览 → ② 用户确认后再带 confirm=YES 执行。
+    async function killByNameHandler(name, phrase) {
+        if (!name) return;
+        try {
+            const pre = await Api.killByName({ name, confirm_phrase: phrase || '' });
+            const targets = pre.targets || [];
+            const skipped = pre.skipped || [];
+
+            // 没有可结束目标：区分"压根没有同名进程"和"全部被保护跳过"两种情况，
+            // 后者必须把原因列出来，否则用户看到"没有可结束的进程"会以为是 bug。
+            if (targets.length === 0) {
+                if (skipped.length === 0) {
+                    UI.toast(`没有名为「${name}」的可结束进程`, 'info', 2500);
+                    return;
+                }
+                const body = `<p>共 <b>${skipped.length}</b> 个名为 <code>${UI.escapeHtml(name)}</code> 的进程，全部受保护或需单独确认，未执行任何操作：</p><ul class="risk-list">${skipped.slice(0, 10).map(s => `<li>PID ${s.pid} — ${UI.escapeHtml(s.reason || '受保护')}</li>`).join('')}${skipped.length > 10 ? `<li class="muted">…另有 ${skipped.length - 10} 个</li>` : ''}</ul><p class="muted">高危/系统进程请在列表中单独结束并输入确认短语。</p>`;
+                await UI.alert('无可批量结束的进程', body);
+                return;
+            }
+
+            const listHtml = targets.slice(0, 15).map(t => `<li>PID ${t.pid} · ${UI.escapeHtml(t.user)} · ${UI.escapeHtml(t.name || t.comm)}</li>`).join('');
+            const skipHtml = skipped.length
+                ? `<p style="margin-top:10px;color:var(--text-3)">已跳过 ${skipped.length} 个受保护/高危进程：${UI.escapeHtml(skipped.slice(0, 5).map(s => 'PID ' + s.pid).join('、'))}${skipped.length > 5 ? ' …' : ''}</p>`
+                : '';
+            const body = `<p>将结束 <b>${targets.length}</b> 个名为 <code>${UI.escapeHtml(name)}</code> 的进程（先 SIGTERM，1s 后未退再 SIGKILL）：</p><ul class="risk-list">${listHtml}${targets.length > 15 ? `<li class="muted">…另有 ${targets.length - 15} 个</li>` : ''}</ul>${skipHtml}`;
+            const ok = await UI.promptConfirm('批量结束同名进程', body, 'KILL ALL');
+            if (!ok) return;
+
+            const r = await Api.killByName({ name, confirm: 'YES', confirm_phrase: phrase || '' });
+            const killedN = (r.killed || []).length;
+            const failedN = (r.failed || []).length;
+            UI.toast(`已结束 ${killedN} 个${failedN ? `，失败 ${failedN} 个` : ''}`, failedN ? 'warn' : 'success', 3000);
+            setTimeout(() => { refreshProcesses(); }, 1200);
+            if ($('proc-drawer').classList.contains('open')) closeProcessDrawer();
+        } catch (e) {
+            UI.toast('批量结束失败: ' + e.message, 'error', 5000);
+        }
+    }
+
     async function showProcessDetail(pid) {
         try {
             const r = await Api.process(pid);
             const p = r.process;
-            $('drawer-title').textContent = `${p.comm || '进程'} · PID ${p.pid}`;
+            // v1.9.0：展示优先用完整进程名（内核 comm 恒 ≤15 字符）
+            const detailName = p.name || p.comm || '';
+            $('drawer-title').textContent = `${detailName || '进程'} · PID ${p.pid}`;
             const ports = (p.ports || []).map(pt => `<span class="badge badge-listening">${pt.proto.toUpperCase()} ${pt.port}</span>`).join(' ') || '<span class="muted">无监听端口</span>';
             const reasons = (p.risk_reasons || []).map(x => `<li>${UI.escapeHtml(x)}</li>`).join('') || '<li class="muted">无明显风险原因</li>';
-            const children = (p.children || []).map(c => `<tr><td>${c.pid}</td><td>${UI.escapeHtml(c.comm)}</td><td>${UI.escapeHtml(c.user)}</td><td>${Number(c.pcpu||0).toFixed(1)}</td><td>${Number(c.pmem||0).toFixed(1)}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">无子进程</td></tr>';
+            const children = (p.children || []).map(c => `<tr><td>${c.pid}</td><td>${UI.escapeHtml(c.name || c.comm)}</td><td>${UI.escapeHtml(c.user)}</td><td>${Number(c.pcpu||0).toFixed(1)}</td><td>${Number(c.pmem||0).toFixed(1)}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">无子进程</td></tr>';
             const killPolicy = p.kill_policy || (p.protected ? 'deny' : (p.risk_level >= 2 ? 'strict' : 'normal'));
             const confirmPhrase = p.confirm_phrase || '';
             const riskLabel = p.risk_label || '';
@@ -547,7 +639,7 @@
             const protectText = killPolicy === 'deny' ? '🔒 受保护，禁止结束' : (killPolicy === 'strict' ? '⚠️ 高危操作，需输入确认短语' : (killPolicy === 'warn' ? '⚠️ 应用/高权限进程，需二次确认' : '可结束'));
             $('drawer-body').innerHTML = `
                 <div class="tool-detail-hero">
-                    <div><span class="muted">${UI.escapeHtml(p.user || '-')}</span><h3>${UI.escapeHtml(p.comm || p.cmdline || '-')}</h3><p>PID ${p.pid} · PPID ${p.ppid || '-'} · ${UI.escapeHtml(p.etime || '-')}</p></div>
+                    <div><span class="muted">${UI.escapeHtml(p.user || '-')}</span><h3>${UI.escapeHtml(detailName || p.cmdline || '-')}</h3><p>PID ${p.pid} · PPID ${p.ppid || '-'} · ${UI.escapeHtml(p.etime || '-')}</p></div>
                     <span class="badge risk-${p.risk_level}">${UI.escapeHtml(p.risk_label || '-')}</span>
                 </div>
                 <div class="metric-strip">
@@ -561,16 +653,20 @@
                     <div><b>保护状态</b><span>${UI.escapeHtml(protectText)}</span></div>
                     <div><b>端口</b><span>${ports}</span></div>
                     <div><b>父进程</b><span>${p.ppid || '-'} ${UI.escapeHtml(p.parent_name || '')}</span></div>
+                    <div><b>进程名</b><span>${UI.escapeHtml(detailName || '-')}${p.name && p.comm && p.name !== p.comm ? ` <small class="muted">(内核短名 ${UI.escapeHtml(p.comm)})</small>` : ''}</span></div>
+                    <div><b>用户 / UID</b><span>${UI.escapeHtml(p.user || '-')}${Number.isFinite(p.uid) && p.uid >= 0 ? ` (${p.uid})` : ''}</span></div>
+                    <div><b>类型</b><span>${p.is_kernel ? '内核线程' : '用户态进程'}</span></div>
                     <div><b>cwd</b><span>${UI.escapeHtml(p.cwd || '-')}</span></div>
                     <div><b>exe</b><span>${UI.escapeHtml(p.exe || '-')}</span></div>
                 </div>
                 <h4>完整命令行</h4><pre class="detail-pre">${UI.escapeHtml(p.cmdline || p.args || '')}</pre>
                 <h4>风险原因</h4><ul class="risk-list">${reasons}</ul>
-                <div class="drawer-actions"><button class="danger" data-kill-pid="${p.pid}" data-pid="${p.pid}" data-cmd="${UI.escapeHtml(p.comm || p.cmdline || '')}" data-policy="${killPolicy}" data-phrase="${UI.escapeHtml(confirmPhrase)}" data-label="${UI.escapeHtml(riskLabel)}" data-from-drawer="1"${killDisabled}>${killLabel}</button><button id="drawer-refresh-proc">刷新详情</button></div>
+                <div class="drawer-actions"><button class="danger" data-kill-pid="${p.pid}" data-pid="${p.pid}" data-cmd="${UI.escapeHtml(detailName || p.cmdline || '')}" data-policy="${killPolicy}" data-phrase="${UI.escapeHtml(confirmPhrase)}" data-label="${UI.escapeHtml(riskLabel)}" data-from-drawer="1"${killDisabled}>${killLabel}</button><button id="drawer-kill-same" data-name="${UI.escapeHtml(detailName)}" data-phrase="${UI.escapeHtml(confirmPhrase)}"${killDisabled}>结束全部同名</button><button id="drawer-refresh-proc">刷新详情</button></div>
                 <h4>子进程 (${p.child_count || 0})</h4>
                 <table class="mini-table"><thead><tr><th>PID</th><th>名称</th><th>用户</th><th>CPU</th><th>MEM</th></tr></thead><tbody>${children}</tbody></table>
             `;
             const k = $('drawer-body').querySelector('[data-kill-pid]'); if (k && !k.disabled) k.onclick = () => killProcessHandler(k);
+            const ks = $('drawer-kill-same'); if (ks && !ks.disabled) ks.onclick = () => killByNameHandler(ks.dataset.name, ks.dataset.phrase || '');
             const rr = $('drawer-refresh-proc'); if (rr) rr.onclick = () => showProcessDetail(p.pid);
             $('proc-drawer').classList.remove('hidden');
             $('proc-drawer').classList.add('open');
@@ -704,7 +800,10 @@
         $('svc-logs').classList.remove('hidden');
         try {
             const r = await Api.serviceLogs(unit, 200);
-            $('svc-logs-body').textContent = r.logs || '(空)';
+            const body = $('svc-logs-body');
+            body.textContent = r.logs || '(空)';
+            // v1.9.0：journalctl 按时间正序输出，最新在最后 —— 自动滚到底部
+            body.scrollTop = body.scrollHeight;
         } catch (e) {
             $('svc-logs-body').textContent = '加载失败: ' + e.message;
         }

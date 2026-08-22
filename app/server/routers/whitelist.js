@@ -1,5 +1,9 @@
 // /api/whitelist 路由
 // v1.0.6 BUG 修复：schema 验证 + 原子写
+// v1.9.0 修 P0-1：写回时保留 config.json 的 version/ui/auth 等非 whitelist 段
+//        —— 旧实现写 { whitelist: merged } 覆盖整个文件，
+//           cmd/main 的 ensure_default_config 检查到缺 ui/auth 字段就备份旧文件
+//           并重新生成默认配置 → 用户自定义白名单在下次重启后全部丢失。
 
 const express = require('express');
 const router = express.Router();
@@ -9,6 +13,21 @@ const whitelist = require('../whitelist');
 
 const TRIM_PKGVAR = process.env.TRIM_PKGVAR || '/tmp';
 const WHITELIST_FILE = path.join(TRIM_PKGVAR, 'config.json');
+
+// cmd/main ensure_default_config 会检查这些顶层段是否存在，缺失即重置整份配置。
+// 写回时若原文件缺这些段（老版本残留），补上默认值，避免重启被重置。
+const CONFIG_DEFAULT_SECTIONS = {
+    version: '1.0',
+    ui: {
+        refresh_interval_ms: 3000,
+        page_size: 200,
+        default_sort: 'cpu'
+    },
+    auth: {
+        max_failures: 5,
+        lockout_minutes: 5
+    }
+};
 
 // === BUG #5 修复：schema 验证 ===
 function validateWhitelist(data) {
@@ -66,10 +85,13 @@ router.put('/', (req, res) => {
     if (!v.ok) return res.status(400).json({ ok: false, ...v });
 
     try {
-        // 合并：保留未提供的字段；v1.4.0 起 config.json 统一写入 { whitelist: {...} }
+        // v1.9.0 修 P0-1：读整份 config.json，只替换 whitelist 段，其余原样保留
+        const full = whitelist.readFullConfig(WHITELIST_FILE) || {};
         const current = whitelist.load(WHITELIST_FILE);
         const merged = { ...current, ...req.body };
-        atomicWriteJson(WHITELIST_FILE, { whitelist: merged });
+
+        const out = { ...CONFIG_DEFAULT_SECTIONS, ...full, whitelist: merged };
+        atomicWriteJson(WHITELIST_FILE, out);
         // 清缓存
         whitelist.clearCache();
         res.json({ ok: true, whitelist: merged });

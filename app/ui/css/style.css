@@ -1816,7 +1816,6 @@ input:checked + .slider:before { transform: translateX(20px); }
 .toast.hidden {
     display: none !important;
 }
- echo Done!
 
 /* ====== 强化修复 ====== */
 /* 确保顶部统计完全隐藏 */
@@ -1846,7 +1845,6 @@ input:checked + .slider:before { transform: translateX(20px); }
     white-space: nowrap;
     margin-left: 16px;
 }
- echo CSS enhanced!
 
 /* ====== 修复弹窗显示 - 统一用 .hidden ====== */
 /* 抽屉 */
@@ -1860,7 +1858,6 @@ input:checked + .slider:before { transform: translateX(20px); }
 /* Toast */
 .toast.hidden { display: none; }
 .toast:not(.hidden) { display: block; }
- echo CSS fixed!
 
 /* ====== 系统信息页图形化 ====== */
 .system-grid {
@@ -2004,7 +2001,6 @@ input:checked + .slider:before { transform: translateX(20px); }
     flex: 1;
     min-width: 120px;
 }
- echo CSS for system page & settings added!
 
 /* ====== 设置中心信息列表美化 ====== */
 .setting-info-list {
@@ -2056,4 +2052,623 @@ input:checked + .slider:before { transform: translateX(20px); }
     border-color: var(--primary-border);
     color: var(--primary);
 }
- echo Setting list CSS added!
+
+
+/* ==================================================================
+   v1.9.0 补全缺失样式 + 主题实装
+   ------------------------------------------------------------------
+   审查发现：HTML/JS 里用了 25 个类名但 CSS 完全没有定义，
+   badge 连基类都没有 → 全部渲染成裸文字；
+   主题切换（data-theme）和命令列宽（data-cmd-width）是空功能。
+   ================================================================== */
+
+/* ====== Badge 基类 + 各语义变体 ====== */
+.badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 22px;
+    padding: 0 9px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1;
+    white-space: nowrap;
+    border: 1px solid var(--border);
+    background: var(--bg-3);
+    color: var(--text-2);
+    vertical-align: middle;
+}
+.badge-app {
+    background: var(--primary-light);
+    color: var(--primary);
+    border-color: var(--primary-border);
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.badge-listening {
+    background: var(--success-light);
+    color: var(--success);
+    border-color: var(--success-border);
+    font-variant-numeric: tabular-nums;
+}
+.badge-protected {
+    background: var(--warn-light);
+    color: var(--warn);
+    border-color: rgba(245, 158, 11, 0.25);
+    padding: 0 6px;
+}
+.badge-running,
+.badge-active {
+    background: var(--success-light);
+    color: var(--success);
+    border-color: var(--success-border);
+}
+.badge-inactive {
+    background: var(--bg-4);
+    color: var(--text-3);
+}
+.badge-failed {
+    background: var(--danger-light);
+    color: var(--danger);
+    border-color: var(--danger-border);
+}
+/* systemd active 字段实测取值：active / inactive / failed / activating（+ deactivating） */
+.badge-activating,
+.badge-deactivating,
+.badge-reloading {
+    background: var(--warn-light);
+    color: var(--warn);
+    border-color: rgba(245, 158, 11, 0.25);
+}
+/* 风险等级 badge（抽屉标题右侧） */
+.badge.risk-0 { background: var(--success-light); color: var(--success); border-color: var(--success-border); }
+.badge.risk-1 { background: var(--warn-light);    color: var(--warn);    border-color: rgba(245,158,11,0.25); }
+.badge.risk-2,
+.badge.risk-3 { background: var(--danger-light);  color: var(--danger);  border-color: var(--danger-border); }
+
+/* ====== 无常驻进程的应用行淡化 ====== */
+tr.dim { opacity: 0.55; }
+tr.dim:hover { opacity: 1; }
+
+/* ====== 纯文字按钮（PID 列） ====== */
+.link-btn {
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    color: var(--primary);
+    cursor: pointer;
+    font-variant-numeric: tabular-nums;
+}
+.link-btn:hover { text-decoration: underline; }
+
+/* ====== 业务表格（此前只有全局 table 兜底） ====== */
+.app-table,
+.port-table,
+.svc-table,
+.audit-table,
+.wl-rule-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+}
+.app-table td,
+.port-table td,
+.svc-table td,
+.audit-table td { vertical-align: middle; }
+.wl-rule-table td { padding: 8px 10px; }
+.wl-rule-table code {
+    background: var(--bg-3);
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+}
+.rule-type {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    background: var(--primary-light);
+    color: var(--primary);
+    font-size: 11px;
+    font-weight: 600;
+}
+
+/* ====== 进程详情抽屉内部 ====== */
+.detail-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 10px 18px;
+    margin: 14px 0 4px;
+}
+.detail-grid > div {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 10px 12px;
+    background: var(--bg-3);
+    border-radius: var(--radius-md);
+    min-width: 0;
+}
+.detail-grid > div > b {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-3);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+.detail-grid > div > span {
+    font-size: 13px;
+    color: var(--text);
+    word-break: break-all;
+}
+.tool-grid { margin-bottom: 8px; }
+.detail-pre {
+    margin: 8px 0 16px;
+    padding: 12px 14px;
+    background: var(--bg-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text-2);
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 200px;
+    overflow: auto;
+}
+.risk-list {
+    margin: 8px 0 16px;
+    padding-left: 20px;
+    font-size: 13px;
+    color: var(--text-2);
+    line-height: 1.8;
+}
+.risk-list li::marker { color: var(--warn); }
+.risk-list li.muted::marker { color: var(--text-3); }
+
+/* 抽屉内子进程小表 */
+.mini-table {
+    width: 100%;
+    margin-top: 8px;
+    font-size: 12px;
+}
+.mini-table th {
+    padding: 8px 8px;
+    font-size: 10px;
+    position: static;
+}
+.mini-table td {
+    padding: 7px 8px;
+    font-variant-numeric: tabular-nums;
+}
+
+/* ====== 自动刷新指示灯 ====== */
+.refresh-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--success);
+    box-shadow: 0 0 0 3px var(--success-bg);
+}
+.refresh-indicator.off .refresh-dot {
+    background: var(--text-3);
+    box-shadow: 0 0 0 3px var(--bg-4);
+}
+
+/* ====== 白名单高级编辑（details/summary） ====== */
+.advanced-editor {
+    margin: 0 0 16px;
+    padding: 12px 16px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+}
+.advanced-editor > summary {
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-2);
+    list-style: none;
+}
+.advanced-editor > summary::-webkit-details-marker { display: none; }
+.advanced-editor > summary::before {
+    content: '▸ ';
+    color: var(--text-3);
+}
+.advanced-editor[open] > summary::before { content: '▾ '; }
+.advanced-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 14px;
+    margin-top: 14px;
+}
+.advanced-grid label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-2);
+}
+.advanced-grid textarea {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-2);
+    color: var(--text);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    resize: vertical;
+}
+
+/* ====== 紧凑模式（设置里的开关，原本无任何效果） ====== */
+body.compact-mode th { padding: 8px 8px; }
+body.compact-mode td { padding: 6px 8px; }
+body.compact-mode .content-surface { padding: 0 12px 12px; }
+body.compact-mode .dash-card,
+body.compact-mode .panel,
+body.compact-mode .sys-card,
+body.compact-mode .settings-card { padding: 12px 14px; }
+body.compact-mode .toolbar { gap: 8px; }
+body.compact-mode .dashboard-cards,
+body.compact-mode .dashboard-grid,
+body.compact-mode .settings-grid { gap: 10px; }
+
+/* ====== 命令列宽度（设置 + 进程页 chip，原本无任何效果） ====== */
+body[data-cmd-width="wide"]    .proc-table { min-width: 1400px !important; }
+body[data-cmd-width="wide"]    .cmd-cell span { -webkit-line-clamp: 3; }
+body[data-cmd-width="compact"] .proc-table { min-width: 900px !important; }
+body[data-cmd-width="compact"] .cmd-cell span { -webkit-line-clamp: 1; }
+
+/* ==================================================================
+   主题实装：data-theme = system | light | dark
+   原本 CSS 里没有任何 [data-theme] / prefers-color-scheme 规则，
+   设置中心的主题下拉是纯粹的空功能。
+   ================================================================== */
+:root,
+body[data-theme="light"] {
+    color-scheme: light;
+}
+
+/* 深色变量（显式选择 dark 时） */
+body[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #0f172a;
+    --bg-2: #172033;
+    --bg-3: #1e293b;
+    --bg-4: #2b3648;
+    --text: #e6edf7;
+    --text-2: #b3c0d4;
+    --text-3: #8494ab;
+    --primary: #60a5fa;
+    --primary-light: rgba(96, 165, 250, 0.16);
+    --primary-bg: rgba(96, 165, 250, 0.10);
+    --primary-border: rgba(96, 165, 250, 0.34);
+    --success: #34d399;
+    --success-light: rgba(52, 211, 153, 0.16);
+    --success-bg: rgba(52, 211, 153, 0.10);
+    --success-border: rgba(52, 211, 153, 0.32);
+    --warn: #fbbf24;
+    --warn-light: rgba(251, 191, 36, 0.16);
+    --warn-bg: rgba(251, 191, 36, 0.10);
+    --danger: #f87171;
+    --danger-light: rgba(248, 113, 113, 0.16);
+    --danger-bg: rgba(248, 113, 113, 0.10);
+    --danger-border: rgba(248, 113, 113, 0.34);
+    --border: #2b3648;
+    --border-light: #232e40;
+    --panel: #172033;
+    --panel-2: #1b2537;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 4px 10px rgba(0, 0, 0, 0.45);
+    --shadow-lg: 0 12px 28px rgba(0, 0, 0, 0.5);
+}
+
+/* 跟随系统：只在系统为暗色时套用同一组变量 */
+@media (prefers-color-scheme: dark) {
+    body[data-theme="system"] {
+        color-scheme: dark;
+        --bg: #0f172a;
+        --bg-2: #172033;
+        --bg-3: #1e293b;
+        --bg-4: #2b3648;
+        --text: #e6edf7;
+        --text-2: #b3c0d4;
+        --text-3: #8494ab;
+        --primary: #60a5fa;
+        --primary-light: rgba(96, 165, 250, 0.16);
+        --primary-bg: rgba(96, 165, 250, 0.10);
+        --primary-border: rgba(96, 165, 250, 0.34);
+        --success: #34d399;
+        --success-light: rgba(52, 211, 153, 0.16);
+        --success-bg: rgba(52, 211, 153, 0.10);
+        --success-border: rgba(52, 211, 153, 0.32);
+        --warn: #fbbf24;
+        --warn-light: rgba(251, 191, 36, 0.16);
+        --warn-bg: rgba(251, 191, 36, 0.10);
+        --danger: #f87171;
+        --danger-light: rgba(248, 113, 113, 0.16);
+        --danger-bg: rgba(248, 113, 113, 0.10);
+        --danger-border: rgba(248, 113, 113, 0.34);
+        --border: #2b3648;
+        --border-light: #232e40;
+        --panel: #172033;
+        --panel-2: #1b2537;
+        --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+        --shadow-md: 0 4px 10px rgba(0, 0, 0, 0.45);
+        --shadow-lg: 0 12px 28px rgba(0, 0, 0, 0.5);
+    }
+}
+
+
+/* ==================================================================
+   v1.9.0 Toast 选择器修复（审查追加发现）
+   ------------------------------------------------------------------
+   ui.js 的实现是：t.className = 'toast ' + type，DOM 只有一个
+   <div id="toast" class="toast hidden">，没有任何子元素。
+   而旧 CSS 写的是 `.toast > div`（子元素）和 `.toast .error`（后代），
+   两者都匹配不到 → toast 实际渲染成右下角一行裸文字，
+   没有背景、边框、内边距、阴影，深色文字在浅背景上几乎看不清。
+   正确写法是 `.toast` 自身 + `.toast.error` 等同元素类组合。
+   ================================================================== */
+.toast {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 14px 20px;
+    box-shadow: var(--shadow-lg);
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text);
+    word-break: break-word;
+    animation: slideUp 0.25s ease;
+}
+.toast.error {
+    border-color: var(--danger-border);
+    background: var(--danger-light);
+    color: var(--danger);
+}
+.toast.success {
+    border-color: var(--success-border);
+    background: var(--success-light);
+    color: var(--success);
+}
+.toast.warn {
+    border-color: var(--warn);
+    background: var(--warn-light);
+    color: var(--warn);
+}
+.toast.info {
+    border-color: var(--primary-border);
+    background: var(--primary-light);
+    color: var(--primary);
+}
+
+
+/* ==================================================================
+   v1.9.0 二轮扫描补齐（脚本比对 HTML/JS 用到的 135 个 class 与 CSS 定义）
+   ------------------------------------------------------------------
+   下列 class 在 HTML/JS 里使用但 CSS 完全无定义，全部靠浏览器默认样式，
+   其中服务日志面板（.logs-panel）尤其明显：无边框、无背景、不可滚动，
+   200 行 journalctl 输出会把整页撑开。
+   ================================================================== */
+
+/* ====== tabs 容器（.side-tabs 已有样式，基类缺失） ====== */
+.tabs {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+/* ====== 顶栏操作按钮 ====== */
+.top-action {
+    height: 32px;
+    padding: 0 14px;
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text-2);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+.top-action:hover {
+    color: var(--text);
+    background: var(--bg-4);
+}
+.top-action.danger-lite {
+    color: var(--danger);
+    border-color: var(--danger-border);
+    background: var(--danger-light);
+}
+.top-action.danger-lite:hover {
+    background: var(--danger);
+    border-color: var(--danger);
+    color: #fff;
+}
+
+/* ====== 次要 chip（.chip 已有基类，ghost 变体缺失） ====== */
+.chip.ghost {
+    background: transparent;
+    border-style: dashed;
+    color: var(--text-3);
+}
+.chip.ghost:hover {
+    border-style: solid;
+    color: var(--text-2);
+    background: var(--bg-3);
+}
+
+/* ====== 进程表表头列宽 ======
+   实际 <th> 用的是 col-* 类名，而 CSS 里只定义了 .cg-*（colgroup 版本），
+   table-layout:fixed 下首行单元格宽度才生效，所以列宽一直没被约束。
+   v1.9.0 用户名列加宽：修 P0-4 后拿到的是完整用户名，
+   fnOS 应用用户形如 com.dustinky.qwenpaw（20 字符），90px 会溢出压到相邻列。 */
+.proc-table .col-pid    { width: 76px; }
+.proc-table .col-user   { width: 132px; }
+.proc-table .col-app    { width: 150px; }
+.proc-table .col-cpu    { width: 62px; }
+.proc-table .col-mem    { width: 62px; }
+.proc-table .col-cmd    { width: auto; }
+.proc-table .col-ports  { width: 120px; }
+.proc-table .col-risk   { width: 96px; }
+.proc-table .col-action { width: 100px; }
+/* colgroup 版本同步（两套并存，谁生效都对得上） */
+.proc-table .cg-user  { width: 132px; }
+.proc-table .cg-pid   { width: 76px; }
+.proc-table .cg-cpu   { width: 62px; }
+.proc-table .cg-mem   { width: 62px; }
+.proc-table .cg-ports { width: 120px; }
+.proc-table .cg-risk  { width: 96px; }
+
+/* 用户名单元格：过长时截断并保留 tooltip，绝不溢出压盖相邻列 */
+.proc-table td:nth-child(2) {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+}
+/* 应用/进程列：badge 与短名分两行，禁止横向溢出 */
+.proc-app-cell {
+    overflow: hidden;
+}
+.proc-app-cell .badge-app {
+    max-width: 100%;
+}
+.proc-app-cell small {
+    display: block;
+    margin-top: 2px;
+    color: var(--text-3);
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ====== 服务日志面板 ======
+   v1.9.0：.tab-content 是 flex column，.table-wrap 带 flex:1。
+   日志面板作为兄弟节点插入后，若不锁定 flex 尺寸，两者会争抢高度 ——
+   实测表格被压到只剩表头（232 行数据看不见），日志面板贴着表头显示。
+   这里给面板 flex:0 0 auto + 上限高度，并给表格区留最小高度。 */
+.tab-content > .table-wrap {
+    min-height: 140px;
+}
+.logs-panel {
+    flex: 0 0 auto;
+    margin: 0 18px 18px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    max-height: 45%;
+}
+.logs-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 16px;
+    background: var(--panel-2);
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+}
+.logs-head button {
+    width: 26px;
+    height: 26px;
+    line-height: 1;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--panel);
+    color: var(--text-3);
+    font-size: 16px;
+    cursor: pointer;
+}
+.logs-head button:hover {
+    color: var(--danger);
+    border-color: var(--danger-border);
+}
+.logs-panel pre {
+    margin: 0;
+    padding: 14px 16px;
+    flex: 1;
+    min-height: 0;
+    max-height: 420px;
+    overflow: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.65;
+    color: var(--text-2);
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+/* ====== 白名单表单区 ====== */
+.whitelist-form { margin-bottom: 16px; }
+.form-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 16px;
+}
+.form-actions #wl-status {
+    font-size: 12px;
+    color: var(--text-3);
+}
+.whitelist-visual {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+.wl-rule-table-wrap {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    overflow: auto;
+    max-height: 460px;
+}
+
+/* ====== 进程/端口表格单元格 ====== */
+.proc-name {
+    font-weight: 600;
+    color: var(--text);
+    word-break: break-all;
+}
+.ports-cell {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    align-items: center;
+}
+.action-btn.proc-detail,
+.action-btn.port-detail {
+    color: var(--primary);
+    border-color: var(--primary-border);
+    background: var(--primary-light);
+}
+.action-btn.proc-detail:hover,
+.action-btn.port-detail:hover {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: #fff;
+}
+
+/* ====== 风险列（原本只有 .risk-cell 出现在选择器组合中） ======
+   v1.9.0：用 inline-flex 而非 flex —— td 内用 block flex 容器会脱离
+   单元格垂直居中（实测风险文字被推到单元格底部，与端口列错位）。 */
+.risk-cell {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+    vertical-align: middle;
+}

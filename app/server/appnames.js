@@ -122,9 +122,15 @@ function matchAppFromText(text, fnosApps) {
 function getAppName(proc) {
   if (!proc) return null;
 
-  const comm = (proc.comm || '').trim();
-  if (comm && SYSTEM_SERVICES[comm]) return { ...SYSTEM_SERVICES[comm] };
+  // v1.9.0：comm 受内核 TASK_COMM_LEN=16 限制恒 ≤15 字符，
+  // SYSTEM_SERVICES 里 systemd-journald(16) / systemd-resolved(16) / fail2ban-server 等
+  // 只能靠 process.js 还原的 name / exe_name 命中。
+  for (const cand of [proc.comm, proc.name, proc.exe_name]) {
+    const key = (cand || '').trim();
+    if (key && SYSTEM_SERVICES[key]) return { ...SYSTEM_SERVICES[key] };
+  }
 
+  const comm = (proc.comm || '').trim();
   const exe = (proc.exe || '').trim();
   const cwd = (proc.cwd || '').trim();
   const cmdline = (proc.cmdline || '').trim();

@@ -1,6 +1,8 @@
-// proc-guardian 白名单校验
+// proc-guardian 白名单校验 v1.9.0
 // API 层强制拦截：PID 1、白名单内 PID/用户/进程名/cmdline 关键字
 // v1.0.6：新增 load() 函数 + 加载失败不写回默认值
+// v1.9.0：① 进程名支持尾部 `*` 通配（配套 process.js 改读 /proc/comm 拿完整进程名，修 P0-3）
+//         ② 用户名匹配现在拿到的是完整用户名（process.js 由 uid 反查，修 P0-4）
 
 const fs = require('fs');
 const path = require('path');
@@ -20,6 +22,20 @@ const DEFAULT_WHITELIST = {
     ports: []
 };
 
+/**
+ * 进程名匹配：默认全等，支持尾部 `*` 前缀通配。
+ * 例：`ksoftirqd/*` 命中 ksoftirqd/0..N；`trim_*` 命中 trim_app_center 等。
+ * v1.9.0 前 comm 被 ps 截断到 15 字符，全等匹配对长进程名恒不命中（P0-3）。
+ */
+function matchName(comm, pattern) {
+    if (!comm || !pattern) return false;
+    if (pattern.endsWith('*')) {
+        const prefix = pattern.slice(0, -1);
+        return prefix.length > 0 && comm.startsWith(prefix);
+    }
+    return comm === pattern;
+}
+
 function readConfig() {
     const now = Date.now();
     if (cache && (now - cacheTime) < CACHE_TTL_MS) return cache;
@@ -32,6 +48,21 @@ function readConfig() {
         // 加载失败：返内存默认值（不写回 config.json）
         return { whitelist: { ...DEFAULT_WHITELIST } };
     }
+}
+
+/**
+ * 读取整份 config.json（含 version/ui/auth 等非 whitelist 段）。
+ * v1.9.0 修 P0-1：PUT /api/whitelist 写回时必须保留这些段，
+ * 否则 cmd/main 的 ensure_default_config 会因缺 ui/auth 字段重新生成默认配置，
+ * 用户自定义白名单全部丢失。
+ */
+function readFullConfig(configFile) {
+    const file = configFile || CONFIG_FILE;
+    try {
+        const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+        if (data && typeof data === 'object' && !Array.isArray(data)) return data;
+    } catch (e) {}
+    return null;
 }
 
 // === BUG 修复：暴露 load 函数给 routers 调用 ===
@@ -79,11 +110,16 @@ function checkProcess(proc) {
         return { protected: true, reason: `user:${proc.user}` };
     }
 
-    // 4) 进程名白名单
-    if (Array.isArray(wl.process_names) && proc.comm) {
+    // 4) 进程名白名单（支持尾部 * 通配；comm 短名和 name 完整名都匹配）
+    // v1.9.0：内核 TASK_COMM_LEN=16 → comm 恒 ≤15 字符，
+    //         systemd-journald(16) 这类只能靠 process.js 从 exe basename 还原的 name 命中
+    if (Array.isArray(wl.process_names)) {
+        const candidates = [proc.comm, proc.name, proc.exe_name].filter(Boolean);
         for (const name of wl.process_names) {
-            if (proc.comm === name) {
-                return { protected: true, reason: `name:${name}` };
+            for (const cand of candidates) {
+                if (matchName(cand, name)) {
+                    return { protected: true, reason: `name:${name}` };
+                }
             }
         }
     }
@@ -111,8 +147,11 @@ function checkPort(port) {
 
 module.exports = {
     readConfig,
+    readFullConfig,
     load,
     clearCache,
     checkProcess,
-    checkPort
+    checkPort,
+    matchName,
+    DEFAULT_WHITELIST
 };

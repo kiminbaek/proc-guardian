@@ -1,5 +1,6 @@
 // /api/processes 路由
 // v1.1.0：应用名 + 端口 + 父子进程 + 风险分级
+// v1.9.0 修 P1-8：应用归属统一走 appresolve 公共模块，列表与 kill 判定一致
 
 const express = require('express');
 const router = express.Router();
@@ -8,6 +9,7 @@ const procMod = require('../process');
 const portsMod = require('../ports');
 const wlMod = require('../whitelist');
 const appnames = require('../appnames');
+const appresolve = require('../appresolve');
 const risk = require('../risk');
 const audit = require('../audit');
 
@@ -15,21 +17,11 @@ const audit = require('../audit');
 router.get('/', (req, res) => {
     let procs = procMod.getAllProcesses();
     const allProcs = procs;
-    const byPidAll = new Map(allProcs.map(x => [x.pid, x]));
-    const appCacheAll = new Map();
-    function appForAll(proc) {
-        if (!proc) return null;
-        if (appCacheAll.has(proc.pid)) return appCacheAll.get(proc.pid);
-        let app = appnames.getAppName(proc);
-        if ((!app || app.app_id === 'nodejs_v22') && proc.ppid && byPidAll.has(proc.ppid)) {
-            const parentApp = appForAll(byPidAll.get(proc.ppid));
-            if (parentApp && parentApp.app_id && parentApp.app_id !== 'system') app = parentApp;
-        }
-        appCacheAll.set(proc.pid, app);
-        return app;
-    }
+    const resolver = appresolve.createResolver(allProcs);
+    const byPidAll = resolver.byPid;
+    const appForAll = (proc) => resolver.resolve(proc);
 
-    // 搜索（命令/用户/PID/应用名）
+    // 搜索（命令/用户/PID/应用名/完整进程名）
     const search = (req.query.search || '').toString().toLowerCase().trim();
     if (search) {
         procs = procs.filter(p => {
@@ -37,6 +29,8 @@ router.get('/', (req, res) => {
             return String(p.pid).includes(search) ||
                 (p.user && p.user.toLowerCase().includes(search)) ||
                 (p.comm && p.comm.toLowerCase().includes(search)) ||
+                (p.name && p.name.toLowerCase().includes(search)) ||
+                (p.exe_name && p.exe_name.toLowerCase().includes(search)) ||
                 (p.cmdline && p.cmdline.toLowerCase().includes(search)) ||
                 (p.args && p.args.toLowerCase().includes(search)) ||
                 (app && app.app_name && app.app_name.toLowerCase().includes(search)) ||
@@ -82,10 +76,11 @@ router.get('/', (req, res) => {
         return {
             pid: p.pid,
             ppid: p.ppid,
-            parent_name: parent ? parent.comm : null,
+            parent_name: parent ? (parent.name || parent.comm) : null,
             child_count: children.length,
-            children: children.slice(0, 20).map(c => ({ pid: c.pid, comm: c.comm, user: c.user, pcpu: c.pcpu, pmem: c.pmem })),
+            children: children.slice(0, 20).map(c => ({ pid: c.pid, comm: c.comm, name: c.name, user: c.user, pcpu: c.pcpu, pmem: c.pmem })),
             user: p.user,
+            uid: p.uid,
             pri: p.pri,
             ni: p.ni,
             vsz: p.vsz,
@@ -94,6 +89,9 @@ router.get('/', (req, res) => {
             pmem: p.pmem,
             etime: p.etime,
             comm: p.comm,
+            name: p.name,
+            exe_name: p.exe_name,
+            is_kernel: p.is_kernel,
             cmdline: p.cmdline,
             args: p.args,
             cwd: p.cwd,
@@ -114,7 +112,8 @@ router.get('/', (req, res) => {
     // 排序
     const sort = (req.query.sort || 'cpu').toString();
     const order = (req.query.order || 'desc').toString();
-    const sortField = { cpu: 'pcpu', mem: 'pmem', pid: 'pid', user: 'user', name: 'comm' }[sort] || 'pcpu';
+    // v1.9.0：name 排序改按完整进程名（p.name），与界面展示一致
+    const sortField = { cpu: 'pcpu', mem: 'pmem', pid: 'pid', user: 'user', name: 'name' }[sort] || 'pcpu';
     visible.sort((a, b) => {
         const av = a[sortField], bv = b[sortField];
         if (typeof av === 'number' && typeof bv === 'number') {
@@ -142,25 +141,21 @@ router.get('/', (req, res) => {
 
 // GET /api/processes/:pid
 router.get('/:pid', (req, res) => {
-    const p = procMod.getProcessByPid(req.params.pid);
+    const all = procMod.getAllProcesses();
+    const p = all.find(x => x.pid === Number(req.params.pid)) || null;
     if (!p) return res.status(404).json({ ok: false, error: 'process_not_found' });
     const wl = wlMod.checkProcess(p);
-    const all = procMod.getAllProcesses();
-    const byPid = new Map(all.map(x => [x.pid, x]));
-    let app = appnames.getAppName(p);
-    if ((!app || app.app_id === 'nodejs_v22') && p.ppid && byPid.has(p.ppid)) {
-        const parentApp = appnames.getAppName(byPid.get(p.ppid));
-        if (parentApp && parentApp.app_id && parentApp.app_id !== 'system') app = parentApp;
-    }
+    // v1.9.0：与列表接口共用 appresolve，避免详情页/列表页归属不一致
+    const app = appresolve.resolveOne(p, all);
     const parent = all.find(x => x.pid === p.ppid) || null;
-    const children = all.filter(x => x.ppid === p.pid).map(c => ({ pid: c.pid, comm: c.comm, user: c.user, pcpu: c.pcpu, pmem: c.pmem, cmdline: c.cmdline }));
+    const children = all.filter(x => x.ppid === p.pid).map(c => ({ pid: c.pid, comm: c.comm, name: c.name, user: c.user, pcpu: c.pcpu, pmem: c.pmem, cmdline: c.cmdline }));
     const ports = portsMod.getAllListeningPorts().filter(pt => pt.pid === p.pid || (pt.fds || []).some(fd => fd.pid === p.pid));
     const rk = risk.classify(p, app, wl);
     res.json({
         ok: true,
         process: {
             ...p,
-            parent_name: parent ? parent.comm : null,
+            parent_name: parent ? (parent.name || parent.comm) : null,
             children,
             child_count: children.length,
             ports,
@@ -180,12 +175,15 @@ router.post('/kill', (req, res) => {
     if (!Number.isFinite(pid) || pid <= 0) {
         return res.status(400).json({ ok: false, error: 'invalid_pid' });
     }
-    const proc = procMod.getProcessByPid(pid);
+    const all = procMod.getAllProcesses();
+    const proc = all.find(x => x.pid === pid) || null;
     if (!proc) return res.status(404).json({ ok: false, error: 'process_not_found' });
 
     const wl = wlMod.checkProcess(proc);
 
-    const app = appnames.getAppName(proc);
+    // v1.9.0 修 P1-8：与列表接口用同一套归属解析（含父进程继承），
+    // 否则同一进程列表判 fnos_app/warn、kill 判 user/normal，保护会被降级。
+    const app = appresolve.resolveOne(proc, all);
     const rk = risk.classify(proc, app, wl);
     if (rk.kill_policy === 'deny') {
         audit.append('kill_denied', { ...audit.fromReq(req), pid, comm: proc.comm, category: rk.category, risk_level: rk.risk_level });
@@ -216,20 +214,29 @@ router.post('/kill-by-name', (req, res) => {
     const name = (req.body.name || '').toString().trim();
     if (!name) return res.status(400).json({ ok: false, error: 'no_name' });
 
-    const all = procMod.getAllProcesses().filter(p => p.comm === name);
+    // v1.9.0：进程名匹配三候选（comm 短名 / name 完整名 / exe basename），
+    // 与白名单同一套语义，避免长进程名（>15 字符）匹配不上（P0-3 同源）
+    const allProcs = procMod.getAllProcesses();
+    const all = allProcs.filter(p => p.comm === name || p.name === name || p.exe_name === name);
     if (all.length === 0) return res.json({ ok: true, killed: 0, skipped: 0 });
+
+    const resolver = appresolve.createResolver(allProcs);
 
     const skipped = [];
     const targets = [];
+    // v1.9.0 修「warn 级批量杀无短语确认」：warn 级需带对应 confirm_phrase 才放行
+    const phrase = (req.body.confirm_phrase || '').toString();
     for (const p of all) {
         const wl = wlMod.checkProcess(p);
         // S2 修复：加入风险分级检查，deny/strict 策略的进程不能被批量杀
-        const app = appnames.getAppName(p);
+        const app = resolver.resolve(p);
         const rk = risk.classify(p, app, wl);
         if (wl.protected || rk.kill_policy === 'deny') {
             skipped.push({ pid: p.pid, reason: wl.reason || rk.risk_label });
         } else if (rk.kill_policy === 'strict') {
             skipped.push({ pid: p.pid, reason: `高危进程：${rk.risk_label}（需单独确认）` });
+        } else if (rk.kill_policy === 'warn' && rk.confirm_phrase && phrase !== rk.confirm_phrase) {
+            skipped.push({ pid: p.pid, reason: `${rk.risk_label}：需输入确认短语「${rk.confirm_phrase}」`, confirm_phrase: rk.confirm_phrase });
         } else {
             targets.push(p);
         }
@@ -239,7 +246,7 @@ router.post('/kill-by-name', (req, res) => {
         return res.json({
             ok: false,
             needs_confirm: true,
-            targets: targets.map(p => ({ pid: p.pid, comm: p.comm, user: p.user, cmdline: p.cmdline })),
+            targets: targets.map(p => ({ pid: p.pid, comm: p.comm, name: p.name, user: p.user, cmdline: p.cmdline })),
             skipped
         });
     }
@@ -256,6 +263,10 @@ router.post('/kill-by-name', (req, res) => {
     }
 
     if (killed.length > 0) {
+        // M8 同源：批量杀后也要清缓存，否则刷新看到"僵尸"
+        procMod.clearCache();
+        portsMod.clearCache();
+        audit.append('kill_by_name', { ...audit.fromReq(req), name, killed: killed.length, skipped: skipped.length, failed: failed.length });
         setTimeout(() => {
             for (const pid of killed) {
                 try {
@@ -267,6 +278,7 @@ router.post('/kill-by-name', (req, res) => {
                     procMod.killProcess(pid, 'SIGKILL', true);
                 } catch (e) {}
             }
+            procMod.clearCache();
         }, 1000).unref();
     }
 

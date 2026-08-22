@@ -34,6 +34,34 @@
             });
         },
 
+        // 纯信息提示弹窗（v1.9.0）
+        // 复用同一个 modal，但隐藏「取消」并把确认按钮改成中性样式 ——
+        // 用 confirm() 展示"无可结束的进程"这类只读信息时，
+        // 红色危险按钮 + 取消/确认二选一会让用户以为还要做破坏性决定。
+        alert(title, body) {
+            return new Promise((resolve) => {
+                const modal = document.getElementById('modal-confirm');
+                document.getElementById('modal-title').textContent = title;
+                document.getElementById('modal-body').innerHTML = body;
+                modal.classList.remove('hidden');
+
+                const ok = document.getElementById('modal-ok');
+                const cancel = document.getElementById('modal-cancel');
+                cancel.classList.add('hidden');
+                ok.classList.remove('danger');
+                ok.textContent = '知道了';
+                const close = () => {
+                    modal.classList.add('hidden');
+                    cancel.classList.remove('hidden');
+                    ok.classList.add('danger');
+                    ok.textContent = '确认';
+                    ok.onclick = null;
+                    resolve(true);
+                };
+                ok.onclick = close;
+            });
+        },
+
         // 输入确认弹窗（用于高危操作）
         promptConfirm(title, body, phrase) {
             return new Promise((resolve) => {

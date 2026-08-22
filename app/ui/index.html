@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#1a1a1a">
     <title>进程管理 - 飞牛 fnOS</title>
-    <link rel="stylesheet" href="/css/style.css?v=1.8.2">
+    <link rel="stylesheet" href="/css/style.css?v=1.9.0">
 </head>
 <body>
     <!-- 登录页 -->
@@ -150,7 +150,7 @@
                             <th class="col-mem">MEM</th>
                             <th class="col-cmd">命令</th>
                             <th class="col-ports">端口</th>
-                            <th>风险</th>
+                            <th class="col-risk">风险</th>
                             <th class="col-action">操作</th>
                         </tr>
                     </thead>
@@ -229,7 +229,8 @@
 
         <!-- 白名单 Tab -->
         <section id="tab-whitelist" class="tab-content hidden">
-            <p class="hint">受保护的进程 / 用户 / 端口：白名单内默认禁止杀，需 <code>confirm: "FORCE"</code> 才强杀。</p>
+            <p class="hint">受保护的进程 / 用户 / 端口：白名单命中即 <b>完全禁止结束</b>（策略 <code>deny</code>），界面上按钮会置灰，API 也会返回 403。若确需操作，请先在此处移除对应规则。</p>
+            <p class="hint">进程名支持尾部通配，例如 <code>ksoftirqd/*</code> 可一次匹配 ksoftirqd/0 ~ ksoftirqd/N。长进程名（超过 15 字符，如 <code>systemd-journald</code>）也能正确匹配。</p>
             <details class="whitelist-form advanced-editor">
                 <summary>高级编辑（批量粘贴 / 每行一个）</summary>
                 <div class="advanced-grid">
@@ -288,7 +289,7 @@
                         <h2>设置中心</h2>
                         <p>把常用偏好、安全策略和数据操作集中到应用内完成，减少网页后台感。</p>
                     </div>
-                    <span class="version-pill">proc-guardian v1.8.2</span>
+                    <span class="version-pill">proc-guardian v1.9.0</span>
                 </div>
                 <div class="settings-grid">
                     <div class="settings-card">
@@ -415,9 +416,9 @@
     <!-- Toast -->
     <div id="toast" class="toast hidden"></div>
 
-    <script src="/lib/api.js?v=1.8.2"></script>
-    <script src="/lib/ui.js?v=1.8.2"></script>
-    <script src="/lib/extra.js?v=1.8.2"></script>
-    <script src="/lib/app.js?v=1.8.2"></script>
+    <script src="/lib/api.js?v=1.9.0"></script>
+    <script src="/lib/ui.js?v=1.9.0"></script>
+    <script src="/lib/extra.js?v=1.9.0"></script>
+    <script src="/lib/app.js?v=1.9.0"></script>
 </body>
 </html>

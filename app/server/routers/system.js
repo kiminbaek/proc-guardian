@@ -1,10 +1,12 @@
 // /api/system 路由
 // v1.0.6 BUG 修复：用 Node.js os.* 原生 API 替代 cat /proc/* 命令
+// v1.9.0：CPU 使用率改 /proc/stat 差值 + 2s 缓存（原本每次 spawn 3 个进程）
 
 const express = require('express');
 const router = express.Router();
 const { execSync } = require('child_process');
 const os = require('os');
+const fs = require('fs');
 
 function safeExec(cmd, timeout = 5000) {
     try {
@@ -32,7 +34,7 @@ function getMemoryInfo() {
     // v1.0.8 修：读 /proc/meminfo 的 MemAvailable（比 free 更准确）
     let available = free;
     try {
-        const meminfo = require('fs').readFileSync('/proc/meminfo', 'utf8');
+        const meminfo = fs.readFileSync('/proc/meminfo', 'utf8');
         const m = meminfo.match(/MemAvailable:\s+(\d+)\s+kB/);
         if (m) {
             available = parseInt(m[1], 10) * 1024;  // kB → bytes
@@ -62,16 +64,52 @@ function getDiskInfo() {
     };
 }
 
-function getCPUUsage() {
-    // top -bn1 第一行 %Cpu
-    const out = safeExec("top -bn1 | grep -E '^%?Cpu' | head -1");
-    if (!out) return 0;
-    const m = out.match(/([\d.]+)\s*id/);
-    if (m) {
-        const idle = parseFloat(m[1]);
-        return Math.max(0, Math.min(100, Math.round(100 - idle)));
+// v1.9.0：CPU 使用率改用 /proc/stat 差值计算 + 2s 缓存
+//
+// 旧实现每次 spawn `top -bn1 | grep | head`（3 个进程），而 /api/system 被前端
+// 5 秒轮询、dashboard 还会并发调一次，等于每 5 秒起 6 个短命进程。
+// 讽刺的是本应用自己就是进程管家，反而在制造进程噪音。
+// /proc/stat 是纯文件读，零进程开销，且差值法比 top 单帧快照更准。
+const CPU_CACHE_TTL_MS = 2000;
+let cpuCache = { value: 0, at: 0 };
+let cpuPrev = null;   // { total, idle }
+
+function readCpuStat() {
+    try {
+        const line = fs.readFileSync('/proc/stat', 'utf8').split('\n')[0];
+        // cpu  user nice system idle iowait irq softirq steal guest guest_nice
+        const f = line.trim().split(/\s+/).slice(1).map(Number);
+        if (f.length < 5 || f.some(n => !Number.isFinite(n))) return null;
+        const idle = f[3] + f[4];                       // idle + iowait
+        const total = f.reduce((a, b) => a + b, 0);
+        return { total, idle };
+    } catch (e) {
+        return null;
     }
-    return 0;
+}
+
+function getCPUUsage() {
+    const now = Date.now();
+    if (cpuCache.at && (now - cpuCache.at) < CPU_CACHE_TTL_MS) return cpuCache.value;
+
+    const cur = readCpuStat();
+    if (!cur) return cpuCache.value;
+
+    let pct = cpuCache.value;
+    if (cpuPrev) {
+        const dTotal = cur.total - cpuPrev.total;
+        const dIdle = cur.idle - cpuPrev.idle;
+        if (dTotal > 0) pct = Math.max(0, Math.min(100, Math.round((1 - dIdle / dTotal) * 100)));
+    } else {
+        // 首次调用没有前值，用 os.loadavg 粗估，避免显示 0
+        try {
+            const cores = require('os').cpus().length || 1;
+            pct = Math.max(0, Math.min(100, Math.round((require('os').loadavg()[0] / cores) * 100)));
+        } catch (e) {}
+    }
+    cpuPrev = cur;
+    cpuCache = { value: pct, at: now };
+    return pct;
 }
 
 function getIps() {

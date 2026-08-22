@@ -36,3 +36,7 @@ proc-guardian-build/
 # - README.md
 # - manifest / cmd/ / config/ / ICON.PNG / ICON_256.PNG / app/ui/config
 # ========================================
+
+# 历史版本备份（本地保留，不入仓库）
+backup_v*/
+backup_v*.tar.gz

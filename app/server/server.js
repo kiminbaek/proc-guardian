@@ -1,4 +1,4 @@
-// proc-guardian 入口服务 v1.8.2
+// proc-guardian 入口服务 v1.9.0
 // 负责：注册路由 + 启动 HTTP 服务 + 优雅退出
 
 const express = require('express');
@@ -17,11 +17,16 @@ if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
 
 const TRIM_PKGVAR = process.env.TRIM_PKGVAR || '/tmp';
 const AUTH_FILE = path.join(TRIM_PKGVAR, 'auth.json');
-const CONFIG_FILE = path.join(TRIM_PKGVAR, 'config.json');
 const LOG_FILE = path.join(TRIM_PKGVAR, 'info.log');
 
-// === BUG #12 修复：trust proxy（防 X-Forwarded-For 伪造）===
-app.set('trust proxy', 1);
+// === BUG #12 修复 → v1.9.0 修 P1-10：关闭 trust proxy ===
+// 旧实现 app.set('trust proxy', 1) 注释写"防 X-Forwarded-For 伪造"，实际效果相反：
+//   req.ip 改为取 XFF 链末位，攻击者每次换 XFF 就换一个"身份"，
+//   5 次失败锁定形同虚设（实测连打 7 次不同 XFF 全部返回 bad_password 无锁定）。
+// proc-guardian 是 fnOS 桌面应用：manifest 里 desktop_uidir=ui + service_port=8877，
+//   浏览器 iframe 直连该端口，没有反向代理链路，也没注册统一网关。
+//   因此必须关闭 trust proxy，让 req.ip 恒为真实 socket 地址，锁定才有效。
+app.set('trust proxy', false);
 // === BUG #10 修复：隐藏 x-powered-by 头 ===
 app.disable('x-powered-by');
 
@@ -35,6 +40,15 @@ app.use('/api/auth', require('./routers/auth'));
 
 // 全局鉴权中间件
 app.use('/api', auth.authMiddleware);
+
+// v1.9.0 修 P1-11：/api/auth/status 必须在鉴权中间件【之后】注册。
+//   旧实现把它放在 routers/auth 里（鉴权之前），且 authMiddleware 又跳过 /auth/ 前缀，
+//   导致无 token 直接访问就返回 {"authenticated":true} —— 硬编码的假值，
+//   还顺带泄漏 server_started_at / uptime。
+//   现在它走完整鉴权：无 token → 401；有效 session → 返回真实状态。
+app.get('/api/auth/status', (req, res) => {
+    res.json({ ok: true, authenticated: true, ...auth.getStatus() });
+});
 
 // 业务路由
 app.use('/api/processes', require('./routers/processes'));
@@ -76,7 +90,7 @@ const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`[${ts}] proc-guardian listening on 0.0.0.0:${PORT}`);
     try {
         fs.appendFileSync(LOG_FILE,
-            `[${new Date().toISOString()}] [boot] proc-guardian v1.8.2 listening on ${PORT}\n`);
+            `[${new Date().toISOString()}] [boot] proc-guardian v1.9.0 listening on ${PORT}\n`);
     } catch (e) {}
 });
 

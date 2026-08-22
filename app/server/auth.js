@@ -151,14 +151,30 @@ setInterval(() => {
     for (const [ip, f] of failures.entries()) if ((n - f.windowStart > WINDOW_MS * 2) && (!f.lockedUntil || n >= f.lockedUntil)) failures.delete(ip);
 }, 10 * 60 * 1000).unref();
 
+// 无需鉴权的 auth 子路径白名单（v1.9.0 修 P1-11）
+// 旧实现是 req.path.startsWith('/auth/') 一律放行，导致 /auth/status 也免鉴权，
+// 而它返回硬编码 authenticated:true + 服务启动时间 → 未授权信息泄漏。
+// 改为精确白名单：只有真正的登录/注册/升级/登出/模式探测免鉴权。
+const PUBLIC_AUTH_PATHS = new Set([
+    '/auth/mode',
+    '/auth/setup',
+    '/auth/upgrade',
+    '/auth/login',
+    '/auth/logout'
+]);
+
 function authMiddleware(req, res, next) {
-    if (req.path.startsWith('/auth/')) return next();
+    if (PUBLIC_AUTH_PATHS.has(req.path)) return next();
     const ip = req.ip || req.connection.remoteAddress || 'unknown';
     if (isLocked(ip)) return res.status(429).json({ ok: false, error: 'too_many_attempts', retry_after: getLockSeconds(ip) });
     const provided = req.headers['x-auth-token'] || req.query.token;
     if (!provided) return res.status(401).json({ ok: false, error: 'no_token' });
     if (verifySession(provided)) return next();
-    recordFailure(ip);
+    // v1.9.0 修 P1-9：无效/过期 session **不**计入暴力破解失败计数。
+    //   旧实现对 bad_session 也 recordFailure(ip)，而前端每 3 秒自动刷新，
+    //   token 过期后 5 次轮询即锁 IP 5 分钟，此时输入正确密码也返回 429
+    //   → 用户体验是"密码没错但登不进去"（实测复现）。
+    //   暴力破解防护只应作用于 /auth/login、/auth/upgrade 这类凭据校验入口。
     return res.status(401).json({ ok: false, error: 'bad_session' });
 }
 

@@ -61,6 +61,7 @@ router.post('/logout', (req, res) => {
     res.json({ ok: true });
 });
 
-router.get('/status', (req, res) => res.json({ ok: true, authenticated: true, ...auth.getStatus() }));
+// v1.9.0 修 P1-11：GET /status 已移到 server.js 的鉴权中间件之后注册，
+// 这里必须删掉，否则本 router（挂载在鉴权之前）会先命中，绕过鉴权。
 
 module.exports = router;
